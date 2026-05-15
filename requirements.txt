@@ -1,0 +1,4 @@
+dash==4.1.0
+dash-cytoscape==1.0.2
+plotly==6.7.0
+gunicorn==23.0.0
