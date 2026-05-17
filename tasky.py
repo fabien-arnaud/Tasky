@@ -1105,6 +1105,27 @@ clientside_callback(
                             {separator: rows.length > 0}));
                     }
 
+                    // Sélectionner tout le projet (si tous les noeuds sélectionnés sont dans le même groupe)
+                    if (nodeIds.length > 0) {
+                        var parents = selNodes.map(function(n){ return n.data('parent') || ''; });
+                        var uniqueParent = parents[0];
+                        var sameGroup = uniqueParent && parents.every(function(p){ return p === uniqueParent; });
+                        if (sameGroup) {
+                            var groupLbl = uniqueParent.replace('group::', '');
+                            var groupChildren = window.cy.nodes().filter(function(n) {
+                                return n.data('parent') === uniqueParent && n.data('is_group') !== 'True';
+                            });
+                            rows.push(menuRow("☑ Sélectionner " + groupLbl, function() {
+                                hideCtxMenu();
+                                setTimeout(function() {
+                                    window.cy.$(':selected').unselect();
+                                    clearEdgeSelection();
+                                    groupChildren.select();
+                                }, 50);
+                            }, {separator: true}));
+                        }
+                    }
+
                     return rows;
                 }
 
