@@ -291,6 +291,7 @@ def build_model_from_csv(csv_path: str = TASKS_CSV) -> Tuple[List[dict], dict]:
     types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv(
         csv_path
     )
+    raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
     count_lockers, priority_paths_tasks = compute_statuses(
         types_dict, status_dict, location_dict, pred_dict, follow_dict
     )
@@ -326,6 +327,7 @@ def build_model_from_csv(csv_path: str = TASKS_CSV) -> Tuple[List[dict], dict]:
     meta = {
         "types_dict": types_dict,
         "status_dict": status_dict,
+        "raw_status_dict": raw_status_dict,
         "location_dict": location_dict,
         "desc_dict": desc_dict,
         "pred_dict": pred_dict,
@@ -341,12 +343,14 @@ def reload_meta_from_csv(csv_path: str = TASKS_CSV) -> dict:
     types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv(
         csv_path
     )
+    raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
     count_lockers, priority_paths_tasks = compute_statuses(
         types_dict, status_dict, location_dict, pred_dict, follow_dict
     )
     return {
         "types_dict": types_dict,
         "status_dict": status_dict,
+        "raw_status_dict": raw_status_dict,
         "location_dict": location_dict,
         "desc_dict": desc_dict,
         "pred_dict": pred_dict,
@@ -432,6 +436,9 @@ def patch_elements_after_dependency_change(
         data["type"] = types_dict.get(node_id, data.get("type", "F"))
         data["count_lockers"] = count_lockers.get(node_id, 0)
         data["priority_path"] = node_id in priority_paths_tasks
+        desc_dict = new_meta.get("desc_dict", {})
+        if node_id in desc_dict:
+            data["label"] = desc_dict[node_id]
 
     return out
 
@@ -444,13 +451,16 @@ def _recompute_meta(base_meta: dict, pred_dict: Dict[str, List[str]]) -> dict:
             if p in follow_dict:
                 follow_dict[p].append(k)
     types_dict = base_meta.get("types_dict", {})
-    status_dict = dict(base_meta.get("status_dict", {}))
+    # Toujours partir des statuts bruts (avant compute_statuses) pour éviter l'accumulation de TOPRIO
+    raw_status = dict(base_meta.get("raw_status_dict") or base_meta.get("status_dict", {}))
+    status_dict = dict(raw_status)  # copie car compute_statuses mute en place
     location_dict = base_meta.get("location_dict", {})
     desc_dict = base_meta.get("desc_dict", {})
     count_lockers, priority_paths_tasks = compute_statuses(types_dict, status_dict, location_dict, pred_dict, follow_dict)
     return {
         "types_dict": types_dict,
         "status_dict": status_dict,
+        "raw_status_dict": raw_status,
         "location_dict": location_dict,
         "desc_dict": desc_dict,
         "pred_dict": pred_dict,
@@ -458,6 +468,21 @@ def _recompute_meta(base_meta: dict, pred_dict: Dict[str, List[str]]) -> dict:
         "count_lockers": count_lockers,
         "priority_paths_tasks": priority_paths_tasks,
     }
+
+
+def rebuild_elements_with_positions(new_meta: dict, old_elements: list) -> list:
+    """Reconstruit les éléments depuis le meta (positions préservées depuis old_elements)."""
+    new_els = build_cytoscape_elements(
+        new_meta["types_dict"], new_meta["status_dict"], new_meta["location_dict"],
+        new_meta["desc_dict"], new_meta["pred_dict"], new_meta["follow_dict"],
+        new_meta["count_lockers"], new_meta["priority_paths_tasks"],
+    )
+    old_pos = {el["data"]["id"]: el["position"] for el in old_elements if "position" in el}
+    for el in new_els:
+        nid = el.get("data", {}).get("id")
+        if nid and nid in old_pos:
+            el["position"] = old_pos[nid]
+    return new_els
 
 
 def _collect_ancestors(
@@ -517,7 +542,7 @@ def _collect_descendants(
 def save_csv_from_meta(meta: dict, csv_path: str = TASKS_CSV) -> None:
     """Reécrit le CSV entier depuis le meta-store (pour synchroniser après changements en mémoire)."""
     types_dict = meta.get("types_dict", {})
-    status_dict = meta.get("status_dict", {})
+    status_dict = meta.get("raw_status_dict") or meta.get("status_dict", {})  # statuts bruts sans TOPRIO/Ready
     location_dict = meta.get("location_dict", {})
     desc_dict = meta.get("desc_dict", {})
     pred_dict = meta.get("pred_dict", {})
@@ -929,6 +954,45 @@ clientside_callback(
                 if (e.key === 'Escape') hideCtxMenu();
             });
 
+            // --- Utilitaires menu multi-niveaux ---
+            function shortLabel(lbl) {
+                return (lbl || '').length > 28 ? (lbl || '').substring(0, 26) + '…' : (lbl || '');
+            }
+            function dispatch(action_obj) {
+                window.cy.$(':selected').unselect();
+                clearEdgeSelection();
+                window._ctxAction = action_obj;
+                document.getElementById('ctx-confirm-btn').click();
+                hideCtxMenu();
+            }
+            function menuRow(label, onclick, opts) {
+                var el = document.createElement('div');
+                el.textContent = label;
+                var css = 'padding:9px 18px;cursor:pointer;white-space:nowrap;';
+                if (opts && opts.separator) css += 'border-top:1px solid #e0e0e0;';
+                if (opts && opts.bold) css += 'font-weight:600;';
+                el.style.cssText = css;
+                el.onmouseenter = function(){ el.style.background = '#f0f0f0'; };
+                el.onmouseleave = function(){ el.style.background = ''; };
+                el.onclick = onclick;
+                return el;
+            }
+            function renderMenu(rows) {
+                ctxMenu.innerHTML = '';
+                rows.forEach(function(r) { ctxMenu.appendChild(r); });
+            }
+            function showMenu(rows, x, y) {
+                renderMenu(rows);
+                ctxMenu.style.left = x + 'px';
+                ctxMenu.style.top  = y + 'px';
+                ctxMenu.style.display = 'block';
+                setTimeout(function() {
+                    var r = ctxMenu.getBoundingClientRect();
+                    if (r.right  > window.innerWidth)  ctxMenu.style.left = (x - r.width)  + 'px';
+                    if (r.bottom > window.innerHeight)  ctxMenu.style.top  = (y - r.height) + 'px';
+                }, 0);
+            }
+
             // --- Menu contextuel (clic droit) ---
             window.cy.on('cxttap', function(evt) {
                 evt.originalEvent.preventDefault();
@@ -944,63 +1008,109 @@ clientside_callback(
                 var selNodes = window.cy.$(":selected").filter("node").not('[is_group = "True"]');
                 var edgeIds = selEdges.map(function(e){ return e.id(); });
                 var nodeIds = selNodes.map(function(n){ return n.id(); });
-
-                var items = [];
-
-                // Création de lien : nœud cible du clic droit + exactement 1 autre nœud sélectionné
-                if (!isBg && target.isNode() && target.data('is_group') !== 'True') {
-                    var otherSel = selNodes.not('#' + target.id());
-                    if (otherSel.length === 1) {
-                        var other = otherSel[0];
-                        function shortLabel(el) {
-                            var l = el.data('label') || el.id();
-                            return l.length > 28 ? l.substring(0, 26) + '…' : l;
-                        }
-                        var otherLbl = shortLabel(other);
-                        items.push({action: "create_edge", label: "↩ suit " + otherLbl,    source: other.id(),  target: target.id()});
-                        items.push({action: "create_edge", label: "↪ précède " + otherLbl, source: target.id(), target: other.id()});
-                    }
-                }
-
-                // Suppression unifiée nœuds + liens
-                if (nodeIds.length > 0 || edgeIds.length > 0) {
-                    var parts = [];
-                    if (nodeIds.length === 1) parts.push("1 nœud");
-                    else if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
-                    if (edgeIds.length === 1) parts.push("1 lien");
-                    else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
-                    items.push({action: "delete_selection", label: "🗑 Supprimer " + parts.join(" et "), node_ids: nodeIds, edge_ids: edgeIds});
-                }
-
-                if (items.length === 0) { hideCtxMenu(); return; }
-
                 var x = evt.originalEvent.clientX, y = evt.originalEvent.clientY;
-                ctxMenu.innerHTML = '';
-                items.forEach(function(item) {
-                    var el = document.createElement('div');
-                    el.textContent = item.label;
-                    el.style.cssText = 'padding:9px 18px;cursor:pointer;white-space:nowrap;';
-                    el.onmouseenter = function(){ el.style.background = '#f0f0f0'; };
-                    el.onmouseleave = function(){ el.style.background = ''; };
-                    el.onclick = function() {
-                        window._ctxAction = {action: item.action, edge_ids: item.edge_ids, node_ids: item.node_ids, source: item.source, target: item.target};
-                        document.getElementById('ctx-confirm-btn').click();
-                        if (item.action === 'create_edge') {
-                            window.cy.$(':selected').unselect();
-                            clearEdgeSelection();
+                var isOnNode = !isBg && target.isNode() && target.data('is_group') !== 'True';
+
+                function buildMainMenu() {
+                    var rows = [];
+
+                    // Création de lien
+                    if (isOnNode) {
+                        var otherSel = selNodes.not('#' + target.id());
+                        if (otherSel.length === 1) {
+                            var other = otherSel[0];
+                            var otherLbl = shortLabel(other.data('label') || other.id());
+                            rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
+                            rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
                         }
-                        hideCtxMenu();
-                    };
-                    ctxMenu.appendChild(el);
-                });
-                ctxMenu.style.left = x + 'px';
-                ctxMenu.style.top = y + 'px';
-                ctxMenu.style.display = 'block';
-                setTimeout(function() {
-                    var r = ctxMenu.getBoundingClientRect();
-                    if (r.right > window.innerWidth) ctxMenu.style.left = (x - r.width) + 'px';
-                    if (r.bottom > window.innerHeight) ctxMenu.style.top = (y - r.height) + 'px';
-                }, 0);
+                    }
+
+                    // Statut (nœuds sélectionnés)
+                    if (isOnNode && nodeIds.length > 0) {
+                        rows.push(menuRow("● Statut ▶", function() {
+                            renderMenu([
+                                menuRow("← retour", function(){ renderMenu(buildMainMenu()); }),
+                                menuRow("TODO",     function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }),
+                                menuRow("PRIO ⭐",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }),
+                                menuRow("DONE ✓",   function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }),
+                            ]);
+                        }));
+                    }
+
+                    // Renommer (sélection unique)
+                    if (isOnNode && nodeIds.length === 1) {
+                        rows.push(menuRow("✏ Renommer", function() {
+                            var currentDesc = (target.data('label') || '').replace(/^[0-9]+: */, '');
+                            renderMenu([
+                                menuRow("← retour", function(){ renderMenu(buildMainMenu()); }),
+                            ]);
+                            var inp = document.createElement('input');
+                            inp.type = 'text'; inp.value = currentDesc;
+                            inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                            ctxMenu.appendChild(inp);
+                            var btn = document.createElement('button');
+                            btn.textContent = 'Valider';
+                            btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                            btn.onclick = function() {
+                                var v = inp.value.trim();
+                                if (v) dispatch({action:"rename_node", node_id:nodeIds[0], new_name:v});
+                            };
+                            ctxMenu.appendChild(btn);
+                            inp.focus(); inp.select();
+                            inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                        }));
+                    }
+
+                    // Déplacer vers un projet
+                    if (isOnNode && nodeIds.length > 0) {
+                        rows.push(menuRow("📁 Déplacer ▶", function() {
+                            var projects = window.cy.nodes('[is_group = "True"]')
+                                .map(function(n){ return n.data('label'); })
+                                .filter(function(l){ return !!l; })
+                                .sort();
+                            var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu()); })];
+                            projects.forEach(function(proj) {
+                                subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
+                            });
+                            subRows.push(menuRow("✚ Nouveau projet…", function() {
+                                renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu()); })]);
+                                var inp = document.createElement('input');
+                                inp.type = 'text'; inp.placeholder = 'Nom du projet';
+                                inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                                ctxMenu.appendChild(inp);
+                                var btn = document.createElement('button');
+                                btn.textContent = 'Valider';
+                                btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                                btn.onclick = function() {
+                                    var v = inp.value.trim();
+                                    if (v) dispatch({action:"move_node", node_ids:nodeIds, project:v});
+                                };
+                                ctxMenu.appendChild(btn);
+                                inp.focus();
+                                inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                            }, {separator: true}));
+                            renderMenu(subRows);
+                        }));
+                    }
+
+                    // Suppression
+                    if (nodeIds.length > 0 || edgeIds.length > 0) {
+                        var parts = [];
+                        if (nodeIds.length === 1) parts.push("1 nœud");
+                        else if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
+                        if (edgeIds.length === 1) parts.push("1 lien");
+                        else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
+                        rows.push(menuRow("🗑 Supprimer " + parts.join(" et "),
+                            function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
+                            {separator: rows.length > 0}));
+                    }
+
+                    return rows;
+                }
+
+                var mainRows = buildMainMenu();
+                if (mainRows.length === 0) { hideCtxMenu(); return; }
+                showMenu(mainRows, x, y);
             });
         }
 
@@ -1259,6 +1369,55 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict.setdefault(target, []).append(source)
         new_meta = _recompute_meta(m, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), (source, target), None, new_meta)
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    if action == "set_status":
+        node_ids = action_data.get("node_ids", [])
+        new_status = action_data.get("status")
+        if not node_ids or not new_status:
+            return dash.no_update, dash.no_update, dash.no_update
+        raw_status = dict(m.get("raw_status_dict") or m.get("status_dict", {}))
+        for nid in node_ids:
+            if nid in raw_status:
+                raw_status[nid] = new_status
+        base = dict(m)
+        base["raw_status_dict"] = raw_status
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    if action == "rename_node":
+        node_id = action_data.get("node_id")
+        new_name = action_data.get("new_name", "").strip()
+        if not node_id or not new_name:
+            return dash.no_update, dash.no_update, dash.no_update
+        desc_dict = dict(m.get("desc_dict", {}))
+        desc_dict[node_id] = f"{node_id}: {new_name}"
+        base = dict(m)
+        base["desc_dict"] = desc_dict
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    if action == "move_node":
+        node_ids = action_data.get("node_ids", [])
+        project = action_data.get("project", "").strip()
+        if not node_ids or not project:
+            return dash.no_update, dash.no_update, dash.no_update
+        location_dict = dict(m.get("location_dict", {}))
+        for nid in node_ids:
+            if nid in location_dict:
+                location_dict[nid] = project
+        base = dict(m)
+        base["location_dict"] = location_dict
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
         extent = (viewport_debug or {}).get("extent")
         return new_elements, new_meta, extent
 
