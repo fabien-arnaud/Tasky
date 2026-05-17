@@ -16,7 +16,6 @@ import copy
 import os
 import csv
 import json
-from collections import defaultdict
 from typing import Dict, List, Tuple
 
 import dash
@@ -41,37 +40,20 @@ GRAPH_STYLE = "groups"
 BG_COLOR = "#F5F3EE"
 
 # Couleurs normales (fond des tâches)
-COLOR_TODO = "#E7E3DC"
-COLOR_DONE = "#DDE6DA"
-COLOR_READY = "#EDE4BE"
+COLOR_TODO = "#DDE6DA"
+COLOR_DONE = "#E7E3DC"
+COLOR_READY = "#A7B7C2"
 COLOR_URGENT = "#A7B7C2"
-COLOR_GOAL = "#F0D2CF"
+COLOR_GOAL = "#C5BAD8"
 
 # Couleurs de highlight (surlignage au clic : chaque nœud selon son statut réel)
-COLOR_TODO_HL = "#B2B0AC"
-COLOR_DONE_HL = "#7E8570"
-COLOR_READY_HL = "#D6C27A"
+COLOR_TODO_HL = "#7E8570"
+COLOR_DONE_HL = "#B2B0AC"
+COLOR_READY_HL = "#8FA1AB"
 COLOR_URGENT_HL = "#8FA1AB"
-COLOR_GOAL_HL = "#C9A3A1"
+COLOR_GOAL_HL = "#9B8FBF"
 
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
-COLOR_EDGE_ANCESTORS = "#8FA1AB"   # teinte bleue pour "en amont"
-COLOR_EDGE_DESCENDANTS = "#7E8570"  # teinte verte pour "en aval"
-
-
-def _highlight_color_for_status(status: str, task_type: str) -> str:
-    """Retourne la couleur de fond highlight (_HL) selon le statut calculé et le type de la tâche."""
-    if task_type == "O":
-        return COLOR_GOAL_HL
-    if status == "DONE":
-        return COLOR_DONE_HL
-    if "Ready" in status or "ToBuy" in status:
-        return COLOR_READY_HL
-    if status == "TOPRIO":
-        return COLOR_URGENT_HL
-    if status == "PRIO":
-        return COLOR_GOAL_HL
-    return COLOR_TODO_HL
 
 
 def load_tasks_from_csv(path: str) -> Tuple[
@@ -291,6 +273,7 @@ def build_cytoscape_elements(
                         "id": f"{k}->{t}",
                         "source": k,
                         "target": t,
+                        "source_done": status_dict.get(k) == "DONE",
                     }
                 }
             )
@@ -433,6 +416,7 @@ def patch_elements_after_dependency_change(
                         "id": f"{source}->{target}",
                         "source": source,
                         "target": target,
+                        "source_done": new_meta.get("status_dict", {}).get(source) == "DONE",
                     }
                 }
             )
@@ -442,7 +426,7 @@ def patch_elements_after_dependency_change(
         if "source" in data:
             continue
         node_id = data.get("id")
-        if not node_id:
+        if not node_id or data.get("is_group") == "True":
             continue
         data["status"] = status_dict.get(node_id, data.get("status", "TODO"))
         data["type"] = types_dict.get(node_id, data.get("type", "F"))
@@ -504,6 +488,34 @@ def _collect_descendants(
             stack.append((child, depth + 1))
 
     return list(visited_nodes), list(visited_edges)
+
+
+def save_csv_from_meta(meta: dict, csv_path: str = TASKS_CSV) -> None:
+    """Reécrit le CSV entier depuis le meta-store (pour synchroniser après changements en mémoire)."""
+    types_dict = meta.get("types_dict", {})
+    status_dict = meta.get("status_dict", {})
+    location_dict = meta.get("location_dict", {})
+    desc_dict = meta.get("desc_dict", {})
+    pred_dict = meta.get("pred_dict", {})
+    all_ids = sorted(types_dict.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+    rows = []
+    for i in all_ids:
+        raw_desc = desc_dict.get(i, "")
+        # desc_dict stores "id: description", strip the prefix
+        if raw_desc.startswith(i + ": "):
+            raw_desc = raw_desc[len(i) + 2:]
+        rows.append({
+            "id": i,
+            "type": types_dict.get(i, ""),
+            "status": status_dict.get(i, ""),
+            "location": location_dict.get(i, ""),
+            "description": raw_desc,
+            "predecessors": "-".join(pred_dict.get(i, [])),
+        })
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["id", "type", "status", "location", "description", "predecessors"])
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def update_predecessors_in_csv(
@@ -588,8 +600,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "text-valign": "top",
             "text-halign": "center",
             "font-weight": "bold",
-            "font-size": "16px",
-            # Les groupes ne capturent pas les événements souris : le drag sert à panner la vue.
+            "font-size": "48px",
             "events": "no",
         },
     },
@@ -620,7 +631,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "selector": 'node[status = "TOPRIO"]',
         "style": {"background-color": COLOR_URGENT},
     },
-    {"selector": 'node[status = "DONE"]', "style": {"background-color": COLOR_DONE}},
+    {"selector": 'node[status = "DONE"]', "style": {"background-color": COLOR_DONE, "opacity": 0.3}},
     {
         "selector": 'node[status *= "Ready"]',
         "style": {"background-color": COLOR_READY},
@@ -629,22 +640,38 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "selector": 'node[status *= "ToBuy"]',
         "style": {"background-color": COLOR_READY},
     },
-    # Tâches critiques : contour plus épais
-    {
-        "selector": 'node[status *= "Critic"]',
-        "style": {"border-width": 3, "border-color": "red"},
-    },
     # Mise en avant du chemin de priorité
     {
-        "selector": 'node[priority_path = "True"]',
-        "style": {"border-width": 3, "border-color": "orange"},
+        "selector": 'node[?priority_path]',
+        "style": {"border-width": 3, "border-color": "red"},
     },
-    # Sélection multiple (Shift + rectangle) : contour visible, pas d’overlay pour garder les couleurs
+    # Objectif PRIO : cerclage violet (écrase le rouge du chemin prioritaire)
+    {
+        "selector": 'node[status = "PRIO"]',
+        "style": {"border-width": 3, "border-color": "#9B8FBF"},
+    },
     {
         "selector": "node:selected",
         "style": {
             "border-width": 5,
-            "border-color": "#333",
+            "border-color": "#0066FF",
+            "border-style": "solid",
+        },
+    },
+    {
+        "selector": "edge:selected",
+        "style": {
+            "line-color": "#0066FF",
+            "target-arrow-color": "#0066FF",
+            "width": 7,
+        },
+    },
+    {
+        "selector": "edge.edge-selected",
+        "style": {
+            "line-color": "#0066FF",
+            "target-arrow-color": "#0066FF",
+            "width": 7,
         },
     },
     # Styles pour les arêtes
@@ -658,6 +685,10 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "width": 4,
         },
     },
+    {
+        "selector": "edge[?source_done]",
+        "style": {"opacity": 0.3},
+    },
 ]
 
 
@@ -667,19 +698,6 @@ app.layout = html.Div(
     [
         html.Div(
             [
-                html.Label("Profondeur de surlignage : ", style={"margin-right": "5px"}),
-                dcc.Dropdown(
-                    id="depth-selector",
-                    options=[
-                        {"label": "1 niveau", "value": 1},
-                        {"label": "2 niveaux", "value": 2},
-                        {"label": "3 niveaux", "value": 3},
-                        {"label": "Tous", "value": 0},
-                    ],
-                    value=1,
-                    clearable=False,
-                    style={"width": "160px", "display": "inline-block", "margin-right": "20px"},
-                ),
                 html.Button(
                     "Sauver les positions",
                     id="save-positions",
@@ -692,56 +710,32 @@ app.layout = html.Div(
                     n_clicks=0,
                     style={"margin-right": "10px"},
                 ),
+                html.Button(
+                    "Autosave : ON",
+                    id="autosave-btn",
+                    n_clicks=0,
+                    style={"margin-right": "10px"},
+                ),
+                html.Button(
+                    "Snap : ON",
+                    id="snap-btn",
+                    n_clicks=0,
+                    title="Active/désactive le snap sur grille virtuelle",
+                    style={"margin-right": "10px"},
+                ),
                 html.Span(id="save-status", style={"font-size": "12px", "margin-right": "15px"}),
-                html.Div(
-                    id="node-tooltip",
-                    style={
-                        "display": "inline-block",
-                        "minHeight": "28px",
-                        "padding": "6px 10px",
-                        "marginLeft": "10px",
-                        "backgroundColor": "#fff",
-                        "border": "1px solid #888",
-                        "borderRadius": "4px",
-                        "fontSize": "14px",
-                    },
-                ),
             ],
             style={"margin": "5px 0 10px 0", "display": "flex", "alignItems": "center", "flexWrap": "wrap"},
         ),
-        html.Div(
-            [
-                html.Label("Dépendances : ", style={"margin-right": "8px"}),
-                dcc.Dropdown(
-                    id="add-pred-dropdown",
-                    placeholder="Prédécesseur à ajouter (sélectionnez une tâche ci‑dessus)",
-                    clearable=True,
-                    style={"width": "280px", "display": "inline-block", "margin-right": "8px"},
-                ),
-                html.Button(
-                    "Ajouter dépendance",
-                    id="add-dependency-btn",
-                    n_clicks=0,
-                    style={"margin-right": "10px"},
-                ),
-                html.Button(
-                    "Supprimer la dépendance",
-                    id="remove-dependency-btn",
-                    n_clicks=0,
-                    style={"margin-right": "10px"},
-                ),
-                html.Span(id="dependency-status", style={"font-size": "12px"}),
-            ],
-            style={"margin": "5px 0 10px 0", "display": "flex", "alignItems": "center", "flexWrap": "wrap"},
-        ),
-        dcc.Store(id="selected-node-id", data=None),
-        dcc.Store(id="selected-edge-data", data=None),
         dcc.Store(id="meta-store", data=meta),
         dcc.Store(id="viewport-debug", data=None),
         dcc.Store(id="restore-viewport-trigger", data=None),
         dcc.Store(id="restore-viewport-done", data=0),
         dcc.Store(id="position-history", data=[]),
+        dcc.Store(id="autosave-enabled", data=False),
         dcc.Interval(id="auto-save-interval", interval=10 * 1000, n_intervals=0),
+        dcc.Interval(id="countdown-interval", interval=1000, n_intervals=0),
+        dcc.Store(id="next-autosave-ts", data=0),
         cyto.Cytoscape(
             id="planning-graph",
             elements=elements,
@@ -750,31 +744,29 @@ app.layout = html.Div(
             stylesheet=CYTOSCAPE_STYLESHEET,
             boxSelectionEnabled=True,
         ),
+        html.Div(
+            id="context-menu",
+            style={
+                "display": "none",
+                "position": "fixed",
+                "background": "white",
+                "border": "1px solid #ccc",
+                "borderRadius": "6px",
+                "boxShadow": "2px 4px 12px rgba(0,0,0,0.18)",
+                "zIndex": "1000",
+                "minWidth": "190px",
+                "padding": "4px 0",
+                "fontSize": "14px",
+                "userSelect": "none",
+            },
+        ),
+        html.Button(id="ctx-confirm-btn", n_clicks=0, style={"display": "none"}),
+        dcc.Store(id="ctx-action", data=None),
     ],
     style={"width": "100%", "height": "100vh", "padding": "10px", "backgroundColor": BG_COLOR},
 )
 
 
-@app.callback(
-    Output("selected-node-id", "data"),
-    Input("planning-graph", "tapNodeData"),
-    State("selected-node-id", "data"),
-)
-def toggle_selected_node(tap_node_data, selected_node_id):
-    """
-    Clic sur une tâche : sélectionne la tâche. Recliquer sur la même tâche : déselectionne.
-    Clic sur un groupe : déselectionne.
-    """
-    if not tap_node_data or not isinstance(tap_node_data, dict):
-        return selected_node_id
-    if tap_node_data.get("is_group") == "True":
-        return None
-    node_id = tap_node_data.get("id")
-    if not node_id:
-        return selected_node_id
-    if node_id == selected_node_id:
-        return None
-    return node_id
 
 
 @app.callback(
@@ -790,280 +782,8 @@ def store_viewport_debug(pan, zoom, extent):
     return {"pan": pan, "zoom": zoom, "extent": extent}
 
 
-@app.callback(
-    Output("node-tooltip", "children"),
-    Input("selected-node-id", "data"),
-    [State("meta-store", "data"), State("viewport-debug", "data")],
-)
-def show_node_info(selected_node_id, meta_data, viewport_debug):
-    """Affiche pour la tâche sélectionnée : ID, statut calculé, et pan/zoom/extent (debug)."""
-    m = meta_data if meta_data is not None else meta
-    if not selected_node_id:
-        return "Cliquez sur une tâche pour voir son ID et son statut calculé."
-    status = m.get("status_dict", {}).get(selected_node_id, "?")
-    line = f"ID: {selected_node_id} — Statut calculé: {status}"
-    if viewport_debug:
-        parts = []
-        if viewport_debug.get("pan") is not None:
-            p = viewport_debug["pan"]
-            if isinstance(p, dict):
-                parts.append(f"Pan: x={p.get('x')}, y={p.get('y')}")
-            else:
-                parts.append(f"Pan: {p}")
-        if viewport_debug.get("zoom") is not None:
-            parts.append(f"Zoom: {viewport_debug['zoom']}")
-        if viewport_debug.get("extent") is not None:
-            e = viewport_debug["extent"]
-            if isinstance(e, dict):
-                parts.append(
-                    f"Extent: x1={e.get('x1')}, y1={e.get('y1')}, x2={e.get('x2')}, y2={e.get('y2')}"
-                )
-            else:
-                parts.append(f"Extent: {e}")
-        if parts:
-            line += " | " + " — ".join(parts)
-    return line
 
 
-@app.callback(
-    Output("planning-graph", "stylesheet"),
-    Input("selected-node-id", "data"),
-    Input("depth-selector", "value"),
-    State("meta-store", "data"),
-)
-def highlight_ancestors_descendants(selected_id, depth_value, meta_data):
-    """
-    Met à jour la feuille de style pour surligner :
-    - le nœud sélectionné (bord noir + couleur _HL selon statut)
-    - ses ancêtres et descendants (couleur _HL selon statut de chaque tâche).
-    Si aucune tâche sélectionnée (décliqué), retour au stylesheet de base.
-    """
-    stylesheet = list(CYTOSCAPE_STYLESHEET)
-    m = meta_data if meta_data is not None else meta
-
-    if not selected_id or selected_id.startswith("group::"):
-        return stylesheet
-
-    # 0 = "Tous" (illimité), sinon 1 / 2 / 3 niveaux
-    max_depth = None if depth_value == 0 else (depth_value or 1)
-
-    ancestors, anc_edges = _collect_ancestors(selected_id, m["pred_dict"], max_depth)
-    descendants, desc_edges = _collect_descendants(
-        selected_id, m["follow_dict"], max_depth
-    )
-
-    # Nœud cliqué : bord noir + fond _HL selon son statut réel (une seule fonction pour tout)
-    selected_status = m["status_dict"].get(selected_id, "TODO")
-    selected_type = m["types_dict"].get(selected_id, "F")
-    selected_bg = _highlight_color_for_status(selected_status, selected_type)
-    stylesheet.append(
-        {
-            "selector": f'node[id = "{selected_id}"]',
-            "style": {
-                "border-width": 5,
-                "border-color": "black",
-                "background-color": selected_bg,
-            },
-        }
-    )
-
-    # Ancêtres : chaque nœud avec sa couleur _HL selon son statut (pas une seule couleur pour tous)
-    anc_by_color: Dict[str, List[str]] = defaultdict(list)
-    for aid in ancestors:
-        st = m["status_dict"].get(aid, "TODO")
-        ty = m["types_dict"].get(aid, "F")
-        anc_by_color[_highlight_color_for_status(st, ty)].append(aid)
-    for color, ids in anc_by_color.items():
-        sel = ", ".join(f'node[id = "{i}"]' for i in ids)
-        stylesheet.append(
-            {
-                "selector": sel,
-                "style": {
-                    "border-width": 4,
-                    "border-color": color,
-                    "background-color": color,
-                },
-            }
-        )
-    if anc_edges:
-        sel_edges = ", ".join(f'edge[id = "{e}"]' for e in anc_edges)
-        stylesheet.append(
-            {
-                "selector": sel_edges,
-                "style": {
-                    "width": 6,
-                    "line-color": COLOR_EDGE_ANCESTORS,
-                    "target-arrow-color": COLOR_EDGE_ANCESTORS,
-                },
-            }
-        )
-
-    # Descendants : chaque nœud avec sa couleur _HL selon son statut
-    desc_by_color: Dict[str, List[str]] = defaultdict(list)
-    for did in descendants:
-        st = m["status_dict"].get(did, "TODO")
-        ty = m["types_dict"].get(did, "F")
-        desc_by_color[_highlight_color_for_status(st, ty)].append(did)
-    for color, ids in desc_by_color.items():
-        sel = ", ".join(f'node[id = "{i}"]' for i in ids)
-        stylesheet.append(
-            {
-                "selector": sel,
-                "style": {
-                    "border-width": 4,
-                    "border-color": color,
-                    "background-color": color,
-                },
-            }
-        )
-    if desc_edges:
-        sel_edges = ", ".join(f'edge[id = "{e}"]' for e in desc_edges)
-        stylesheet.append(
-            {
-                "selector": sel_edges,
-                "style": {
-                    "width": 6,
-                    "line-color": COLOR_EDGE_DESCENDANTS,
-                    "target-arrow-color": COLOR_EDGE_DESCENDANTS,
-                },
-            }
-        )
-
-    return stylesheet
-
-
-@app.callback(
-    [Output("add-pred-dropdown", "options"), Output("add-pred-dropdown", "value")],
-    Input("selected-node-id", "data"),
-    State("meta-store", "data"),
-)
-def update_add_pred_dropdown(selected_node_id, meta_data):
-    """Remplit le dropdown des prédécesseurs possibles pour la tâche sélectionnée."""
-    m = meta_data if meta_data is not None else meta
-    pred_dict = m.get("pred_dict", {})
-    desc_dict = m.get("desc_dict", {})
-    types_dict = m.get("types_dict", {})
-    all_ids = list(types_dict.keys())
-    if not selected_node_id or selected_node_id.startswith("group::"):
-        return [], None
-    existing_preds = set(pred_dict.get(selected_node_id, []))
-    options = [
-        {"label": f"{tid} — {desc_dict.get(tid, tid)[:50]}", "value": tid}
-        for tid in sorted(all_ids, key=lambda x: int(x) if x.isdigit() else 0)
-        if tid != selected_node_id and tid not in existing_preds
-    ]
-    return options, None
-
-
-@app.callback(
-    Output("selected-edge-data", "data"),
-    Input("planning-graph", "tapEdgeData"),
-)
-def store_selected_edge(tap_edge_data):
-    """Mémorise l'arête cliquée (pour suppression de dépendance)."""
-    if not tap_edge_data or not isinstance(tap_edge_data, dict):
-        return None
-    return tap_edge_data
-
-
-@app.callback(
-    [
-        Output("planning-graph", "elements", allow_duplicate=True),
-        Output("meta-store", "data", allow_duplicate=True),
-        Output("dependency-status", "children"),
-        Output("add-pred-dropdown", "value", allow_duplicate=True),
-        Output("restore-viewport-trigger", "data", allow_duplicate=True),
-    ],
-    Input("add-dependency-btn", "n_clicks"),
-    [
-        State("selected-node-id", "data"),
-        State("add-pred-dropdown", "value"),
-        State("planning-graph", "elements"),
-        State("viewport-debug", "data"),
-        State("meta-store", "data"),
-    ],
-    prevent_initial_call=True,
-)
-def add_dependency(n_clicks, selected_node_id, new_pred_id, elements_state, viewport_debug, meta_data):
-    """Ajoute un prédécesseur à la tâche sélectionnée et met à jour le CSV."""
-    if not n_clicks or not selected_node_id or not new_pred_id:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-    m = meta_data if meta_data is not None else meta
-    pred_dict = m.get("pred_dict", {})
-    if _would_create_cycle(pred_dict, new_pred_id, selected_node_id):
-        return (
-            dash.no_update,
-            dash.no_update,
-            f"Impossible : créerait un cycle (la tâche {selected_node_id} est déjà en aval de {new_pred_id}).",
-            dash.no_update,
-            dash.no_update,
-        )
-    new_pred_list = list(pred_dict.get(selected_node_id, [])) + [new_pred_id]
-    try:
-        update_predecessors_in_csv(TASKS_CSV, selected_node_id, new_pred_list)
-    except Exception as exc:
-        return (
-            dash.no_update,
-            dash.no_update,
-            f"Erreur écriture CSV : {exc}",
-            dash.no_update,
-            dash.no_update,
-        )
-    new_meta = reload_meta_from_csv(TASKS_CSV)
-    new_elements = patch_elements_after_dependency_change(
-        elements_state, add_edge=(new_pred_id, selected_node_id), remove_edge=None, new_meta=new_meta
-    )
-    extent = (viewport_debug or {}).get("extent") if viewport_debug else None
-    return new_elements, new_meta, f"Dépendance {new_pred_id} → {selected_node_id} ajoutée.", None, extent
-
-
-@app.callback(
-    [
-        Output("planning-graph", "elements", allow_duplicate=True),
-        Output("meta-store", "data", allow_duplicate=True),
-        Output("dependency-status", "children", allow_duplicate=True),
-        Output("selected-edge-data", "data", allow_duplicate=True),
-        Output("restore-viewport-trigger", "data", allow_duplicate=True),
-    ],
-    Input("remove-dependency-btn", "n_clicks"),
-    [
-        State("selected-edge-data", "data"),
-        State("planning-graph", "elements"),
-        State("viewport-debug", "data"),
-        State("meta-store", "data"),
-    ],
-    prevent_initial_call=True,
-)
-def remove_dependency(n_clicks, edge_data, elements_state, viewport_debug, meta_data):
-    """Supprime la dépendance correspondant à l'arête sélectionnée et met à jour le CSV."""
-    if not n_clicks or not edge_data:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-    source = edge_data.get("source")
-    target = edge_data.get("target")
-    if not source or not target:
-        return dash.no_update, dash.no_update, "Sélectionnez une arête (clic sur un lien).", dash.no_update, dash.no_update
-    m = meta_data if meta_data is not None else meta
-    pred_dict = m.get("pred_dict", {})
-    current = list(pred_dict.get(target, []))
-    if source not in current:
-        return dash.no_update, dash.no_update, f"La dépendance {source} → {target} n'existe pas.", dash.no_update, dash.no_update
-    new_pred_list = [p for p in current if p != source]
-    try:
-        update_predecessors_in_csv(TASKS_CSV, target, new_pred_list)
-    except Exception as exc:
-        return (
-            dash.no_update,
-            dash.no_update,
-            f"Erreur écriture CSV : {exc}",
-            dash.no_update,
-            dash.no_update,
-        )
-    new_meta = reload_meta_from_csv(TASKS_CSV)
-    new_elements = patch_elements_after_dependency_change(
-        elements_state, add_edge=None, remove_edge=(source, target), new_meta=new_meta
-    )
-    extent = (viewport_debug or {}).get("extent") if viewport_debug else None
-    return new_elements, new_meta, f"Dépendance {source} → {target} supprimée.", None, extent
 
 
 # Restauration du viewport après ajout/suppression de dépendance (évite le zoom reset de dash-cytoscape).
@@ -1102,6 +822,199 @@ clientside_callback(
     """,
     Output("restore-viewport-done", "data"),
     Input("restore-viewport-trigger", "data"),
+)
+
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        var ctxMenu = document.getElementById('context-menu');
+
+        function hideCtxMenu() { if (ctxMenu) ctxMenu.style.display = 'none'; }
+        function selectEdge(el) {
+            el.addClass('edge-selected');
+            el.style({'line-color': '#0066FF', 'target-arrow-color': '#0066FF', 'width': 7});
+        }
+        function deselectEdge(el) {
+            el.removeClass('edge-selected');
+            el.removeStyle('line-color');
+            el.removeStyle('target-arrow-color');
+            el.removeStyle('width');
+        }
+        function clearEdgeSelection() {
+            window.cy.edges('.edge-selected').each(function(e) { deselectEdge(e); });
+        }
+
+        function registerHandlers() {
+            if (!window.cy || window._cyHandlersRegistered) return;
+            window._cyHandlersRegistered = true;
+
+            // --- Snap on dragfree ---
+            window._snapEnabled = true;
+            window._snapGridSize = 40;
+            window.cy.on('dragfree', 'node', function(evt) {
+                if (!window._snapEnabled) return;
+                var node = evt.target;
+                if (node.data('is_group') === 'True') return;
+                var pos = node.position();
+                node.position({
+                    x: Math.round(pos.x / window._snapGridSize) * window._snapGridSize,
+                    y: Math.round(pos.y / window._snapGridSize) * window._snapGridSize
+                });
+            });
+
+            // --- Toggle-select nœuds ---
+            window._hoverEl = null;
+            window.cy.on('mouseover', 'node, edge', function(evt) {
+                var el = evt.target;
+                var sel = el.isEdge() ? el.hasClass('edge-selected') : el.selected();
+                window._hoverEl = {id: el.id(), selected: sel};
+            });
+            window.cy.on('tap', 'node', function(evt) {
+                hideCtxMenu();
+                var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
+                var wasSelected = window._hoverEl &&
+                                  window._hoverEl.id === evt.target.id() &&
+                                  window._hoverEl.selected;
+                if (!isShift && wasSelected) evt.target.unselect();
+            });
+
+            // --- Toggle-select arêtes ---
+            window.cy.on('tap', 'edge', function(evt) {
+                hideCtxMenu();
+                var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
+                var el = evt.target;
+                var wasSelected = window._hoverEl &&
+                                  window._hoverEl.id === el.id() &&
+                                  window._hoverEl.selected;
+                if (!isShift) {
+                    clearEdgeSelection();
+                    if (!wasSelected) selectEdge(el);
+                } else {
+                    if (wasSelected) deselectEdge(el);
+                    else selectEdge(el);
+                }
+            });
+
+            // Clic sur fond : effacer sélection + menu
+            window.cy.on('tap', function(evt) {
+                if (evt.target === window.cy) { clearEdgeSelection(); hideCtxMenu(); }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') hideCtxMenu();
+            });
+
+            // --- Menu contextuel (clic droit) ---
+            window.cy.on('cxttap', function(evt) {
+                evt.originalEvent.preventDefault();
+                var target = evt.target;
+                var isBg = (target === window.cy);
+
+                if (!isBg) {
+                    if (target.isEdge()) selectEdge(target);
+                    else target.select();
+                }
+
+                var selEdges = window.cy.edges('.edge-selected');
+                var selNodes = window.cy.$(":selected").filter("node").not('[is_group = "True"]');
+                var edgeIds = selEdges.map(function(e){ return e.id(); });
+                var nodeIds = selNodes.map(function(n){ return n.id(); });
+
+                var items = [];
+                if (edgeIds.length > 0) {
+                    var lbl = edgeIds.length === 1 ? "Supprimer ce lien" : "Supprimer " + edgeIds.length + " liens";
+                    items.push({action: "delete_edges", label: "🗑 " + lbl, edge_ids: edgeIds, node_ids: nodeIds});
+                }
+
+                if (items.length === 0) { hideCtxMenu(); return; }
+
+                var x = evt.originalEvent.clientX, y = evt.originalEvent.clientY;
+                ctxMenu.innerHTML = '';
+                items.forEach(function(item) {
+                    var el = document.createElement('div');
+                    el.textContent = item.label;
+                    el.style.cssText = 'padding:9px 18px;cursor:pointer;white-space:nowrap;';
+                    el.onmouseenter = function(){ el.style.background = '#f0f0f0'; };
+                    el.onmouseleave = function(){ el.style.background = ''; };
+                    el.onclick = function() {
+                        window._ctxAction = {action: item.action, edge_ids: item.edge_ids, node_ids: item.node_ids};
+                        document.getElementById('ctx-confirm-btn').click();
+                        hideCtxMenu();
+                    };
+                    ctxMenu.appendChild(el);
+                });
+                ctxMenu.style.left = x + 'px';
+                ctxMenu.style.top = y + 'px';
+                ctxMenu.style.display = 'block';
+                setTimeout(function() {
+                    var r = ctxMenu.getBoundingClientRect();
+                    if (r.right > window.innerWidth) ctxMenu.style.left = (x - r.width) + 'px';
+                    if (r.bottom > window.innerHeight) ctxMenu.style.top = (y - r.height) + 'px';
+                }, 0);
+            });
+        }
+
+        // Enregistre les handlers dès que cy est prêt (avec retries si pas encore initialisé)
+        registerHandlers();
+        if (!window._cyHandlersRegistered) {
+            setTimeout(registerHandlers, 300);
+            setTimeout(registerHandlers, 800);
+        }
+
+        if (!n_clicks) return "Snap : ON";
+        window._snapEnabled = !window._snapEnabled;
+        return window._snapEnabled ? "Snap : ON" : "Snap : OFF";
+    }
+    """,
+    Output("snap-btn", "children"),
+    Input("snap-btn", "n_clicks"),
+)
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks || !window._ctxAction) return window.dash_clientside.no_update;
+        var action = window._ctxAction;
+        window._ctxAction = null;
+        return action;
+    }
+    """,
+    Output("ctx-action", "data"),
+    Input("ctx-confirm-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (!n_clicks) return [false, "Autosave : OFF"];
+        var enabled = n_clicks % 2 !== 0;
+        return [enabled, enabled ? "Autosave : ON" : "Autosave : OFF"];
+    }
+    """,
+    [Output("autosave-enabled", "data"), Output("autosave-btn", "children")],
+    Input("autosave-btn", "n_clicks"),
+)
+
+clientside_callback(
+    "function(n) { return Date.now() + 10000; }",
+    Output("next-autosave-ts", "data"),
+    Input("auto-save-interval", "n_intervals"),
+)
+
+clientside_callback(
+    """
+    function(n, nextTs, enabled) {
+        if (!enabled) return "Sauver les positions";
+        if (!nextTs) return "Sauver les positions";
+        var remaining = Math.max(0, Math.round((nextTs - Date.now()) / 1000));
+        return "Sauver (auto " + remaining + "s)";
+    }
+    """,
+    Output("save-positions", "children"),
+    Input("countdown-interval", "n_intervals"),
+    [State("next-autosave-ts", "data"), State("autosave-enabled", "data")],
 )
 
 
@@ -1150,12 +1063,12 @@ def _apply_positions_to_elements(
 @app.callback(
     [Output("save-status", "children"), Output("position-history", "data")],
     Input("save-positions", "n_clicks"),
-    [State("planning-graph", "elements"), State("position-history", "data")],
+    [State("planning-graph", "elements"), State("position-history", "data"), State("meta-store", "data")],
     prevent_initial_call=True,
 )
-def save_positions(n_clicks, elements_state, history):
+def save_positions(n_clicks, elements_state, history, meta_data):
     """
-    Sauvegarde les positions dans le fichier JSON et les ajoute à l'historique (pour Annuler).
+    Sauvegarde les positions (JSON) et les données (CSV) puis ajoute à l'historique (pour Annuler).
     """
     if not n_clicks:
         return dash.no_update, dash.no_update
@@ -1167,6 +1080,8 @@ def save_positions(n_clicks, elements_state, history):
     try:
         with open(POSITIONS_JSON, "w", encoding="utf-8") as f:
             json.dump(positions, f, indent=2)
+        if meta_data:
+            save_csv_from_meta(meta_data)
     except Exception as exc:
         return f"Erreur lors de la sauvegarde : {exc}", history or []
 
@@ -1204,15 +1119,16 @@ def undo_positions(n_clicks, history, elements_state):
     return new_elements, "Positions restaurées (annulation).", new_history
 
 
+
 @app.callback(
     Output("save-status", "children", allow_duplicate=True),
     Input("auto-save-interval", "n_intervals"),
-    State("planning-graph", "elements"),
+    [State("planning-graph", "elements"), State("autosave-enabled", "data"), State("meta-store", "data")],
     prevent_initial_call=True,
 )
-def auto_save_positions(n_intervals, elements_state):
-    """Sauvegarde automatique des positions toutes les 10 secondes."""
-    if n_intervals == 0:
+def auto_save_positions(n_intervals, elements_state, autosave_enabled, meta_data):
+    """Sauvegarde automatique des positions (JSON) et des données (CSV) toutes les 10 secondes."""
+    if n_intervals == 0 or not autosave_enabled:
         return dash.no_update
     positions = _extract_positions(elements_state or [])
     if not positions:
@@ -1220,9 +1136,68 @@ def auto_save_positions(n_intervals, elements_state):
     try:
         with open(POSITIONS_JSON, "w", encoding="utf-8") as f:
             json.dump(positions, f, indent=2)
+        if meta_data:
+            save_csv_from_meta(meta_data)
     except Exception:
         pass
     return dash.no_update
+
+
+@app.callback(
+    [
+        Output("planning-graph", "elements", allow_duplicate=True),
+        Output("meta-store", "data", allow_duplicate=True),
+        Output("restore-viewport-trigger", "data", allow_duplicate=True),
+    ],
+    Input("ctx-action", "data"),
+    [State("planning-graph", "elements"), State("meta-store", "data"), State("viewport-debug", "data")],
+    prevent_initial_call=True,
+)
+def handle_context_action(action_data, elements_state, meta_data, viewport_debug):
+    if not action_data:
+        return dash.no_update, dash.no_update, dash.no_update
+    action = action_data.get("action")
+    m = meta_data if meta_data is not None else meta
+
+    if action == "delete_edges":
+        edge_ids = action_data.get("edge_ids", [])
+        if not edge_ids:
+            return dash.no_update, dash.no_update, dash.no_update
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        for edge_id in edge_ids:
+            if "->" in edge_id:
+                source, target = edge_id.split("->", 1)
+                preds = pred_dict.get(target, [])
+                if source in preds:
+                    pred_dict[target] = [p for p in preds if p != source]
+        # Recalcul du follow_dict et des statuts en mémoire (sans écrire le CSV)
+        follow_dict: dict = {k: [] for k in pred_dict}
+        for k, preds in pred_dict.items():
+            for p in preds:
+                if p in follow_dict:
+                    follow_dict[p].append(k)
+        types_dict = m.get("types_dict", {})
+        status_dict = m.get("status_dict", {})
+        location_dict = m.get("location_dict", {})
+        desc_dict = m.get("desc_dict", {})
+        count_lockers, priority_paths_tasks = compute_statuses(types_dict, status_dict, location_dict, pred_dict, follow_dict)
+        new_meta = {
+            "types_dict": types_dict,
+            "status_dict": status_dict,
+            "location_dict": location_dict,
+            "desc_dict": desc_dict,
+            "pred_dict": pred_dict,
+            "follow_dict": follow_dict,
+            "count_lockers": count_lockers,
+            "priority_paths_tasks": priority_paths_tasks,
+        }
+        edge_ids_set = set(edge_ids)
+        new_elements = [el for el in (elements_state or []) if el.get("data", {}).get("id") not in edge_ids_set]
+        new_elements = patch_elements_after_dependency_change(new_elements, None, None, new_meta)
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    return dash.no_update, dash.no_update, dash.no_update
 
 
 if __name__ == "__main__":
