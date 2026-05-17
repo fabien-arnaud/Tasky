@@ -436,6 +436,30 @@ def patch_elements_after_dependency_change(
     return out
 
 
+def _recompute_meta(base_meta: dict, pred_dict: Dict[str, List[str]]) -> dict:
+    """Recalcule le meta en mémoire à partir d'un pred_dict modifié, sans toucher au CSV."""
+    follow_dict: Dict[str, List[str]] = {k: [] for k in pred_dict}
+    for k, preds in pred_dict.items():
+        for p in preds:
+            if p in follow_dict:
+                follow_dict[p].append(k)
+    types_dict = base_meta.get("types_dict", {})
+    status_dict = dict(base_meta.get("status_dict", {}))
+    location_dict = base_meta.get("location_dict", {})
+    desc_dict = base_meta.get("desc_dict", {})
+    count_lockers, priority_paths_tasks = compute_statuses(types_dict, status_dict, location_dict, pred_dict, follow_dict)
+    return {
+        "types_dict": types_dict,
+        "status_dict": status_dict,
+        "location_dict": location_dict,
+        "desc_dict": desc_dict,
+        "pred_dict": pred_dict,
+        "follow_dict": follow_dict,
+        "count_lockers": count_lockers,
+        "priority_paths_tasks": priority_paths_tasks,
+    }
+
+
 def _collect_ancestors(
     start_id: str, pred_dict: Dict[str, List[str]], max_depth: int | None = None
 ) -> Tuple[List[str], List[str]]:
@@ -922,9 +946,30 @@ clientside_callback(
                 var nodeIds = selNodes.map(function(n){ return n.id(); });
 
                 var items = [];
-                if (edgeIds.length > 0) {
-                    var lbl = edgeIds.length === 1 ? "Supprimer ce lien" : "Supprimer " + edgeIds.length + " liens";
-                    items.push({action: "delete_edges", label: "🗑 " + lbl, edge_ids: edgeIds, node_ids: nodeIds});
+
+                // Création de lien : nœud cible du clic droit + exactement 1 autre nœud sélectionné
+                if (!isBg && target.isNode() && target.data('is_group') !== 'True') {
+                    var otherSel = selNodes.not('#' + target.id());
+                    if (otherSel.length === 1) {
+                        var other = otherSel[0];
+                        function shortLabel(el) {
+                            var l = el.data('label') || el.id();
+                            return l.length > 28 ? l.substring(0, 26) + '…' : l;
+                        }
+                        var otherLbl = shortLabel(other);
+                        items.push({action: "create_edge", label: "↩ suit " + otherLbl,    source: other.id(),  target: target.id()});
+                        items.push({action: "create_edge", label: "↪ précède " + otherLbl, source: target.id(), target: other.id()});
+                    }
+                }
+
+                // Suppression unifiée nœuds + liens
+                if (nodeIds.length > 0 || edgeIds.length > 0) {
+                    var parts = [];
+                    if (nodeIds.length === 1) parts.push("1 nœud");
+                    else if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
+                    if (edgeIds.length === 1) parts.push("1 lien");
+                    else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
+                    items.push({action: "delete_selection", label: "🗑 Supprimer " + parts.join(" et "), node_ids: nodeIds, edge_ids: edgeIds});
                 }
 
                 if (items.length === 0) { hideCtxMenu(); return; }
@@ -938,8 +983,12 @@ clientside_callback(
                     el.onmouseenter = function(){ el.style.background = '#f0f0f0'; };
                     el.onmouseleave = function(){ el.style.background = ''; };
                     el.onclick = function() {
-                        window._ctxAction = {action: item.action, edge_ids: item.edge_ids, node_ids: item.node_ids};
+                        window._ctxAction = {action: item.action, edge_ids: item.edge_ids, node_ids: item.node_ids, source: item.source, target: item.target};
                         document.getElementById('ctx-confirm-btn').click();
+                        if (item.action === 'create_edge') {
+                            window.cy.$(':selected').unselect();
+                            clearEdgeSelection();
+                        }
                         hideCtxMenu();
                     };
                     ctxMenu.appendChild(el);
@@ -1159,41 +1208,57 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
     action = action_data.get("action")
     m = meta_data if meta_data is not None else meta
 
-    if action == "delete_edges":
+    if action == "delete_selection":
         edge_ids = action_data.get("edge_ids", [])
-        if not edge_ids:
+        node_ids_to_delete = set(action_data.get("node_ids", []))
+        if not edge_ids and not node_ids_to_delete:
             return dash.no_update, dash.no_update, dash.no_update
-        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+
+        # Supprimer les arêtes explicitement sélectionnées + toutes celles liées aux nœuds supprimés
+        edge_ids_set = set(edge_ids)
+        new_elements = [
+            el for el in (elements_state or [])
+            if el.get("data", {}).get("id") not in node_ids_to_delete
+            and el.get("data", {}).get("id") not in edge_ids_set
+            and el.get("data", {}).get("source") not in node_ids_to_delete
+            and el.get("data", {}).get("target") not in node_ids_to_delete
+        ]
+        # Mettre à jour les dicts meta en retirant les nœuds supprimés
+        base_meta = {
+            "types_dict":    {k: v for k, v in m.get("types_dict", {}).items()    if k not in node_ids_to_delete},
+            "status_dict":   {k: v for k, v in m.get("status_dict", {}).items()   if k not in node_ids_to_delete},
+            "location_dict": {k: v for k, v in m.get("location_dict", {}).items() if k not in node_ids_to_delete},
+            "desc_dict":     {k: v for k, v in m.get("desc_dict", {}).items()     if k not in node_ids_to_delete},
+        }
+        pred_dict = {
+            k: [p for p in v if p not in node_ids_to_delete]
+            for k, v in m.get("pred_dict", {}).items()
+            if k not in node_ids_to_delete
+        }
+        # Retirer aussi les liens sélectionnés du pred_dict
         for edge_id in edge_ids:
             if "->" in edge_id:
-                source, target = edge_id.split("->", 1)
-                preds = pred_dict.get(target, [])
-                if source in preds:
-                    pred_dict[target] = [p for p in preds if p != source]
-        # Recalcul du follow_dict et des statuts en mémoire (sans écrire le CSV)
-        follow_dict: dict = {k: [] for k in pred_dict}
-        for k, preds in pred_dict.items():
-            for p in preds:
-                if p in follow_dict:
-                    follow_dict[p].append(k)
-        types_dict = m.get("types_dict", {})
-        status_dict = m.get("status_dict", {})
-        location_dict = m.get("location_dict", {})
-        desc_dict = m.get("desc_dict", {})
-        count_lockers, priority_paths_tasks = compute_statuses(types_dict, status_dict, location_dict, pred_dict, follow_dict)
-        new_meta = {
-            "types_dict": types_dict,
-            "status_dict": status_dict,
-            "location_dict": location_dict,
-            "desc_dict": desc_dict,
-            "pred_dict": pred_dict,
-            "follow_dict": follow_dict,
-            "count_lockers": count_lockers,
-            "priority_paths_tasks": priority_paths_tasks,
-        }
-        edge_ids_set = set(edge_ids)
-        new_elements = [el for el in (elements_state or []) if el.get("data", {}).get("id") not in edge_ids_set]
+                src, tgt = edge_id.split("->", 1)
+                if tgt in pred_dict and src in pred_dict[tgt]:
+                    pred_dict[tgt] = [p for p in pred_dict[tgt] if p != src]
+        new_meta = _recompute_meta(base_meta, pred_dict)
         new_elements = patch_elements_after_dependency_change(new_elements, None, None, new_meta)
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    if action == "create_edge":
+        source = action_data.get("source")
+        target = action_data.get("target")
+        if not source or not target:
+            return dash.no_update, dash.no_update, dash.no_update
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        if source in pred_dict.get(target, []):
+            return dash.no_update, dash.no_update, dash.no_update
+        if _would_create_cycle(pred_dict, source, target):
+            return dash.no_update, dash.no_update, dash.no_update
+        pred_dict.setdefault(target, []).append(source)
+        new_meta = _recompute_meta(m, pred_dict)
+        new_elements = patch_elements_after_dependency_change(list(elements_state or []), (source, target), None, new_meta)
         extent = (viewport_debug or {}).get("extent")
         return new_elements, new_meta, extent
 
