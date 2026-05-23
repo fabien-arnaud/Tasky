@@ -759,6 +759,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
 
 
 app = dash.Dash(__name__)
+server = app.server  # exposition pour gunicorn
 
 
 def serve_layout():
