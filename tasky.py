@@ -600,22 +600,6 @@ def _would_create_cycle(
 
 # --- App Dash minimale : affichage statique du graphe ---
 
-elements, meta = build_model_from_csv()
-
-# Si des positions sont présentes, on utilise le layout "preset" (positions figées).
-# Sinon, on utilise un layout automatique.
-has_preset_positions = any(
-    ("position" in el) and ("source" not in el.get("data", {})) for el in elements
-)
-
-INITIAL_LAYOUT = (
-    {"name": "preset"}
-    if has_preset_positions
-    else {
-        "name": "cose-bilkent",
-    }
-)
-
 # Feuille de style Cytoscape : règles visuelles de base
 CYTOSCAPE_STYLESHEET: List[dict] = [
     {
@@ -743,77 +727,87 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
 
 app = dash.Dash(__name__)
 
-app.layout = html.Div(
-    [
-        html.Div(
-            [
-                html.Button(
-                    "Sauver les positions",
-                    id="save-positions",
-                    n_clicks=0,
-                    style={"margin-right": "10px"},
-                ),
-                html.Button(
-                    "Annuler",
-                    id="undo-positions",
-                    n_clicks=0,
-                    style={"margin-right": "10px"},
-                ),
-                html.Button(
-                    "Autosave : ON",
-                    id="autosave-btn",
-                    n_clicks=0,
-                    style={"margin-right": "10px"},
-                ),
-                html.Button(
-                    "Snap : ON",
-                    id="snap-btn",
-                    n_clicks=0,
-                    title="Active/désactive le snap sur grille virtuelle",
-                    style={"margin-right": "10px"},
-                ),
-                html.Span(id="save-status", style={"font-size": "12px", "margin-right": "15px"}),
-            ],
-            style={"margin": "5px 0 10px 0", "display": "flex", "alignItems": "center", "flexWrap": "wrap"},
-        ),
-        dcc.Store(id="meta-store", data=meta),
-        dcc.Store(id="viewport-debug", data=None),
-        dcc.Store(id="restore-viewport-trigger", data=None),
-        dcc.Store(id="restore-viewport-done", data=0),
-        dcc.Store(id="position-history", data=[]),
-        dcc.Store(id="autosave-enabled", data=False),
-        dcc.Interval(id="auto-save-interval", interval=10 * 1000, n_intervals=0),
-        dcc.Interval(id="countdown-interval", interval=1000, n_intervals=0),
-        dcc.Store(id="next-autosave-ts", data=0),
-        cyto.Cytoscape(
-            id="planning-graph",
-            elements=elements,
-            layout=INITIAL_LAYOUT,
-            style={"width": "100%", "height": "800px", "border": "1px solid #ccc"},
-            stylesheet=CYTOSCAPE_STYLESHEET,
-            boxSelectionEnabled=True,
-        ),
-        html.Div(
-            id="context-menu",
-            style={
-                "display": "none",
-                "position": "fixed",
-                "background": "white",
-                "border": "1px solid #ccc",
-                "borderRadius": "6px",
-                "boxShadow": "2px 4px 12px rgba(0,0,0,0.18)",
-                "zIndex": "1000",
-                "minWidth": "190px",
-                "padding": "4px 0",
-                "fontSize": "14px",
-                "userSelect": "none",
-            },
-        ),
-        html.Button(id="ctx-confirm-btn", n_clicks=0, style={"display": "none"}),
-        dcc.Store(id="ctx-action", data=None),
-    ],
-    style={"width": "100%", "height": "100vh", "padding": "10px", "backgroundColor": BG_COLOR},
-)
+
+def serve_layout():
+    elements, meta = build_model_from_csv()
+    has_preset = any(
+        ("position" in el) and ("source" not in el.get("data", {})) for el in elements
+    )
+    initial_layout = {"name": "preset"} if has_preset else {"name": "cose-bilkent"}
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Button(
+                        "Sauver les positions",
+                        id="save-positions",
+                        n_clicks=0,
+                        style={"margin-right": "10px"},
+                    ),
+                    html.Button(
+                        "Annuler",
+                        id="undo-positions",
+                        n_clicks=0,
+                        style={"margin-right": "10px"},
+                    ),
+                    html.Button(
+                        "Autosave : ON",
+                        id="autosave-btn",
+                        n_clicks=0,
+                        style={"margin-right": "10px"},
+                    ),
+                    html.Button(
+                        "Snap : ON",
+                        id="snap-btn",
+                        n_clicks=0,
+                        title="Active/désactive le snap sur grille virtuelle",
+                        style={"margin-right": "10px"},
+                    ),
+                    html.Span(id="save-status", style={"font-size": "12px", "margin-right": "15px"}),
+                ],
+                style={"margin": "5px 0 10px 0", "display": "flex", "alignItems": "center", "flexWrap": "wrap"},
+            ),
+            dcc.Store(id="meta-store", data=meta),
+            dcc.Store(id="viewport-debug", data=None),
+            dcc.Store(id="restore-viewport-trigger", data=None),
+            dcc.Store(id="restore-viewport-done", data=0),
+            dcc.Store(id="position-history", data=[]),
+            dcc.Store(id="autosave-enabled", data=False),
+            dcc.Interval(id="auto-save-interval", interval=10 * 1000, n_intervals=0),
+            dcc.Interval(id="countdown-interval", interval=1000, n_intervals=0),
+            dcc.Store(id="next-autosave-ts", data=0),
+            cyto.Cytoscape(
+                id="planning-graph",
+                elements=elements,
+                layout=initial_layout,
+                style={"width": "100%", "height": "800px", "border": "1px solid #ccc"},
+                stylesheet=CYTOSCAPE_STYLESHEET,
+                boxSelectionEnabled=True,
+            ),
+            html.Div(
+                id="context-menu",
+                style={
+                    "display": "none",
+                    "position": "fixed",
+                    "background": "white",
+                    "border": "1px solid #ccc",
+                    "borderRadius": "6px",
+                    "boxShadow": "2px 4px 12px rgba(0,0,0,0.18)",
+                    "zIndex": "1000",
+                    "minWidth": "190px",
+                    "padding": "4px 0",
+                    "fontSize": "14px",
+                    "userSelect": "none",
+                },
+            ),
+            html.Button(id="ctx-confirm-btn", n_clicks=0, style={"display": "none"}),
+            dcc.Store(id="ctx-action", data=None),
+        ],
+        style={"width": "100%", "height": "100vh", "padding": "10px", "backgroundColor": BG_COLOR},
+    )
+
+
+app.layout = serve_layout
 
 
 
@@ -1504,7 +1498,14 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
     if not action_data:
         return dash.no_update, dash.no_update, dash.no_update
     action = action_data.get("action")
-    m = meta_data if meta_data is not None else meta
+    m = meta_data or {}
+
+    def _finalize(new_els, new_m):
+        try:
+            save_csv_from_meta(new_m)
+        except Exception:
+            pass
+        return new_els, new_m, (viewport_debug or {}).get("extent")
 
     if action == "delete_selection":
         edge_ids = action_data.get("edge_ids", [])
@@ -1522,11 +1523,13 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
             and el.get("data", {}).get("target") not in node_ids_to_delete
         ]
         # Mettre à jour les dicts meta en retirant les nœuds supprimés
+        raw_src = m.get("raw_status_dict") or m.get("status_dict", {})
         base_meta = {
-            "types_dict":    {k: v for k, v in m.get("types_dict", {}).items()    if k not in node_ids_to_delete},
-            "status_dict":   {k: v for k, v in m.get("status_dict", {}).items()   if k not in node_ids_to_delete},
-            "location_dict": {k: v for k, v in m.get("location_dict", {}).items() if k not in node_ids_to_delete},
-            "desc_dict":     {k: v for k, v in m.get("desc_dict", {}).items()     if k not in node_ids_to_delete},
+            "types_dict":      {k: v for k, v in m.get("types_dict", {}).items()    if k not in node_ids_to_delete},
+            "status_dict":     {k: v for k, v in m.get("status_dict", {}).items()   if k not in node_ids_to_delete},
+            "raw_status_dict": {k: v for k, v in raw_src.items()                    if k not in node_ids_to_delete},
+            "location_dict":   {k: v for k, v in m.get("location_dict", {}).items() if k not in node_ids_to_delete},
+            "desc_dict":       {k: v for k, v in m.get("desc_dict", {}).items()     if k not in node_ids_to_delete},
         }
         pred_dict = {
             k: [p for p in v if p not in node_ids_to_delete]
@@ -1541,8 +1544,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
                     pred_dict[tgt] = [p for p in pred_dict[tgt] if p != src]
         new_meta = _recompute_meta(base_meta, pred_dict)
         new_elements = patch_elements_after_dependency_change(new_elements, None, None, new_meta)
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     if action == "create_edge":
         source = action_data.get("source")
@@ -1557,8 +1559,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict.setdefault(target, []).append(source)
         new_meta = _recompute_meta(m, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), (source, target), None, new_meta)
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     if action == "set_status":
         node_ids = action_data.get("node_ids", [])
@@ -1574,8 +1575,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     if action == "rename_node":
         node_id = action_data.get("node_id")
@@ -1589,8 +1589,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     if action == "move_node":
         node_ids = action_data.get("node_ids", [])
@@ -1606,8 +1605,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     if action == "create_node":
         name = action_data.get("name", "").strip()
@@ -1645,8 +1643,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
                 if el.get("data", {}).get("id") == new_id:
                     el["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
                     break
-        extent = (viewport_debug or {}).get("extent")
-        return new_elements, new_meta, extent
+        return _finalize(new_elements, new_meta)
 
     return dash.no_update, dash.no_update, dash.no_update
 
