@@ -12,11 +12,15 @@ Version Dash / Cytoscape du planning.
   - sauvegarde / rechargement de la position des nœuds
 """
 
+import base64
 import copy
 import os
 import csv
+import io
 import json
 from typing import Dict, List, Tuple
+
+import requests
 
 import dash
 from dash import html, dcc, Input, Output, State, clientside_callback
@@ -26,8 +30,43 @@ import dash_cytoscape as cyto
 cyto.load_extra_layouts()
 
 
-TASKS_CSV = os.path.join(os.path.dirname(__file__) or ".", "tasks.csv")
-POSITIONS_JSON = os.path.join(os.path.dirname(__file__) or ".", "node_positions.json")
+
+
+
+class GitHubStorage:
+    """Lecture/écriture de fichiers via l'API GitHub Contents."""
+
+    def __init__(self):
+        self.token = os.environ.get("GITHUB_TOKEN", "")
+        self.repo = os.environ.get("GITHUB_DATA_REPO", "")  # ex: "fabien-arnaud/tasky-data"
+        self._headers = {
+            "Authorization": f"token {self.token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+
+    def _url(self, filename: str) -> str:
+        return f"https://api.github.com/repos/{self.repo}/contents/{filename}"
+
+    def read_text(self, filename: str) -> str:
+        r = requests.get(self._url(filename), headers=self._headers, timeout=10)
+        r.raise_for_status()
+        return base64.b64decode(r.json()["content"]).decode("utf-8")
+
+    def write_text(self, filename: str, content: str, message: str = "update") -> None:
+        # Récupère le SHA actuel (requis par l'API pour les mises à jour)
+        r = requests.get(self._url(filename), headers=self._headers, timeout=10)
+        r.raise_for_status()
+        sha = r.json()["sha"]
+        payload = {
+            "message": message,
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "sha": sha,
+        }
+        r = requests.put(self._url(filename), headers=self._headers, json=payload, timeout=15)
+        r.raise_for_status()
+
+
+_gh = GitHubStorage()
 
 # Style de graphe (mêmes valeurs conceptuelles que dans Planning.py)
 # - "groups" : groupement par pièce / location
@@ -56,7 +95,7 @@ COLOR_GOAL_HL = "#9B8FBF"
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
 
 
-def load_tasks_from_csv(path: str) -> Tuple[
+def load_tasks_from_csv() -> Tuple[
     Dict[str, str],
     Dict[str, str],
     Dict[str, str],
@@ -72,9 +111,9 @@ def load_tasks_from_csv(path: str) -> Tuple[
     pred_dict: Dict[str, List[str]] = {}
     follow_dict: Dict[str, List[str]] = {}
 
-    with open(path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
+    text = _gh.read_text("tasks.csv")
+    reader = csv.DictReader(io.StringIO(text))
+    for row in reader:
             i = row["id"].strip()
             if not i or not i.isdigit():
                 continue
@@ -281,16 +320,14 @@ def build_cytoscape_elements(
     return elements
 
 
-def build_model_from_csv(csv_path: str = TASKS_CSV) -> Tuple[List[dict], dict]:
+def build_model_from_csv() -> Tuple[List[dict], dict]:
     """
     Point d'entrée de haut niveau pour étapes 1 & 2.
     Retourne :
       - la liste des éléments Cytoscape (nœuds + arêtes)
       - un dict 'meta' avec les structures de base (utile pour les futures callbacks).
     """
-    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv(
-        csv_path
-    )
+    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv()
     raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
     count_lockers, priority_paths_tasks = compute_statuses(
         types_dict, status_dict, location_dict, pred_dict, follow_dict
@@ -307,13 +344,11 @@ def build_model_from_csv(csv_path: str = TASKS_CSV) -> Tuple[List[dict], dict]:
     )
 
     # Si un fichier de positions existe, on l'applique aux nœuds
-    if os.path.exists(POSITIONS_JSON):
-        try:
-            with open(POSITIONS_JSON, "r", encoding="utf-8") as f:
-                saved_positions = json.load(f)
-        except Exception:
-            saved_positions = {}
-        if isinstance(saved_positions, dict):
+    try:
+        saved_positions = json.loads(_gh.read_text("node_positions.json"))
+    except Exception:
+        saved_positions = {}
+    if isinstance(saved_positions, dict):
             for el in elements:
                 data = el.get("data", {})
                 node_id = data.get("id")
@@ -338,11 +373,9 @@ def build_model_from_csv(csv_path: str = TASKS_CSV) -> Tuple[List[dict], dict]:
     return elements, meta
 
 
-def reload_meta_from_csv(csv_path: str = TASKS_CSV) -> dict:
+def reload_meta_from_csv() -> dict:
     """Recharge les dictionnaires et recalcule les statuts sans reconstruire les éléments (pour mise à jour légère)."""
-    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv(
-        csv_path
-    )
+    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv()
     raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
     count_lockers, priority_paths_tasks = compute_statuses(
         types_dict, status_dict, location_dict, pred_dict, follow_dict
@@ -539,7 +572,7 @@ def _collect_descendants(
     return list(visited_nodes), list(visited_edges)
 
 
-def save_csv_from_meta(meta: dict, csv_path: str = TASKS_CSV) -> None:
+def save_csv_from_meta(meta: dict) -> None:
     """Reécrit le CSV entier depuis le meta-store (pour synchroniser après changements en mémoire)."""
     types_dict = meta.get("types_dict", {})
     status_dict = meta.get("raw_status_dict") or meta.get("status_dict", {})  # statuts bruts sans TOPRIO/Ready
@@ -550,7 +583,6 @@ def save_csv_from_meta(meta: dict, csv_path: str = TASKS_CSV) -> None:
     rows = []
     for i in all_ids:
         raw_desc = desc_dict.get(i, "")
-        # desc_dict stores "id: description", strip the prefix
         if raw_desc.startswith(i + ": "):
             raw_desc = raw_desc[len(i) + 2:]
         rows.append({
@@ -561,10 +593,11 @@ def save_csv_from_meta(meta: dict, csv_path: str = TASKS_CSV) -> None:
             "description": raw_desc,
             "predecessors": "-".join(pred_dict.get(i, [])),
         })
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["id", "type", "status", "location", "description", "predecessors"])
-        writer.writeheader()
-        writer.writerows(rows)
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["id", "type", "status", "location", "description", "predecessors"])
+    writer.writeheader()
+    writer.writerows(rows)
+    _gh.write_text("tasks.csv", buf.getvalue(), message="update tasks")
 
 
 def update_predecessors_in_csv(
@@ -1419,8 +1452,7 @@ def save_positions(n_clicks, elements_state, history, meta_data):
         return "Aucune position à sauvegarder.", history or []
 
     try:
-        with open(POSITIONS_JSON, "w", encoding="utf-8") as f:
-            json.dump(positions, f, indent=2)
+        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="update positions")
         if meta_data:
             save_csv_from_meta(meta_data)
     except Exception as exc:
@@ -1451,8 +1483,7 @@ def undo_positions(n_clicks, history, elements_state):
     restore = new_history[-1] if new_history else {}
 
     try:
-        with open(POSITIONS_JSON, "w", encoding="utf-8") as f:
-            json.dump(restore, f, indent=2)
+        _gh.write_text("node_positions.json", json.dumps(restore, indent=2), message="undo positions")
     except Exception as exc:
         return dash.no_update, f"Erreur annulation : {exc}", dash.no_update
 
@@ -1475,8 +1506,7 @@ def auto_save_positions(n_intervals, elements_state, autosave_enabled, meta_data
     if not positions:
         return dash.no_update
     try:
-        with open(POSITIONS_JSON, "w", encoding="utf-8") as f:
-            json.dump(positions, f, indent=2)
+        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="autosave positions")
         if meta_data:
             save_csv_from_meta(meta_data)
     except Exception:
