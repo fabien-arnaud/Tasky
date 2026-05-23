@@ -1011,8 +1011,122 @@ clientside_callback(
                 var x = evt.originalEvent.clientX, y = evt.originalEvent.clientY;
                 var isOnNode = !isBg && target.isNode() && target.data('is_group') !== 'True';
 
+                // --- Menu fond (clic droit dans le vide) ---
+                if (isBg) {
+                    var container = window.cy.container();
+                    var contRect = container.getBoundingClientRect();
+                    var zoom = window.cy.zoom();
+                    var pan = window.cy.pan();
+                    var modelX = (evt.originalEvent.clientX - contRect.left - pan.x) / zoom;
+                    var modelY = (evt.originalEvent.clientY - contRect.top - pan.y) / zoom;
+
+                    var clickedGroup = null;
+                    window.cy.nodes('[is_group = "True"]').each(function(n) {
+                        var bb = n.boundingBox();
+                        if (modelX >= bb.x1 && modelX <= bb.x2 && modelY >= bb.y1 && modelY <= bb.y2) {
+                            clickedGroup = n;
+                        }
+                    });
+
+                    var bgRows = [];
+
+                    var showCreateForm = function(projName, backFn) {
+                        renderMenu([menuRow("← retour", backFn)]);
+                        var inp = document.createElement('input');
+                        inp.type = 'text'; inp.placeholder = 'Nom de la tâche';
+                        inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                        ctxMenu.appendChild(inp);
+                        var btn = document.createElement('button');
+                        btn.textContent = 'Valider';
+                        btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                        btn.onclick = function() {
+                            var v = inp.value.trim();
+                            if (v) dispatch({action:"create_node", name:v, project:projName, position:{x:modelX, y:modelY}});
+                        };
+                        ctxMenu.appendChild(btn);
+                        inp.focus();
+                        inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                    };
+
+                    if (clickedGroup) {
+                        var projName = clickedGroup.data('label') || '';
+                        var groupId = clickedGroup.id();
+                        var groupChildren = window.cy.nodes().filter(function(n) {
+                            return n.data('parent') === groupId && n.data('is_group') !== 'True';
+                        });
+                        bgRows.push(menuRow("✚ Nouvelle tâche dans " + projName, function(pn) {
+                            return function() { showCreateForm(pn, function() { showMenu(bgRows, x, y); }); };
+                        }(projName)));
+                        bgRows.push(menuRow("☑ Sélectionner " + projName, function() {
+                            hideCtxMenu();
+                            setTimeout(function() {
+                                window.cy.$(':selected').unselect();
+                                clearEdgeSelection();
+                                groupChildren.select();
+                            }, 50);
+                        }, {separator: true}));
+                    } else {
+                        bgRows.push(menuRow("✚ Nouvelle tâche…", function() {
+                            var projects = window.cy.nodes('[is_group = "True"]')
+                                .map(function(n){ return n.data('label') || ''; })
+                                .filter(function(l){ return !!l; })
+                                .sort();
+                            var subRows = [menuRow("← retour", function(){ showMenu(bgRows, x, y); })];
+                            projects.forEach(function(proj) {
+                                subRows.push(menuRow("📁 " + proj, function(pn){ return function() {
+                                    showCreateForm(pn, function(){ renderMenu(subRows); });
+                                }; }(proj)));
+                            });
+                            subRows.push(menuRow("✚ Nouveau projet…", function() {
+                                renderMenu([menuRow("← retour", function(){ renderMenu(subRows); })]);
+                                var projInp = document.createElement('input');
+                                projInp.type = 'text'; projInp.placeholder = 'Nom du projet';
+                                projInp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                                ctxMenu.appendChild(projInp);
+                                var taskInp = document.createElement('input');
+                                taskInp.type = 'text'; taskInp.placeholder = 'Nom de la tâche';
+                                taskInp.style.cssText = 'margin:2px 10px 6px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                                ctxMenu.appendChild(taskInp);
+                                var btn = document.createElement('button');
+                                btn.textContent = 'Valider';
+                                btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                                btn.onclick = function() {
+                                    var pv = projInp.value.trim(), tv = taskInp.value.trim();
+                                    if (pv && tv) dispatch({action:"create_node", name:tv, project:pv, position:{x:modelX, y:modelY}});
+                                };
+                                ctxMenu.appendChild(btn);
+                                projInp.focus();
+                                projInp.onkeydown = function(e){ if (e.key==='Enter') taskInp.focus(); };
+                                taskInp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                            }, {separator: true}));
+                            renderMenu(subRows);
+                        }));
+                    }
+
+                    if (bgRows.length > 0) showMenu(bgRows, x, y);
+                    return;
+                }
+
                 function buildMainMenu() {
                     var rows = [];
+
+                    var showNewNodeForm = function(actionObj) {
+                        renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu()); })]);
+                        var inp = document.createElement('input');
+                        inp.type = 'text'; inp.placeholder = 'Nom de la tâche';
+                        inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                        ctxMenu.appendChild(inp);
+                        var btn = document.createElement('button');
+                        btn.textContent = 'Valider';
+                        btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                        btn.onclick = function() {
+                            var v = inp.value.trim();
+                            if (v) dispatch(Object.assign({name: v}, actionObj));
+                        };
+                        ctxMenu.appendChild(btn);
+                        inp.focus();
+                        inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                    };
 
                     // Création de lien
                     if (isOnNode) {
@@ -1103,6 +1217,18 @@ clientside_callback(
                         rows.push(menuRow("🗑 Supprimer " + parts.join(" et "),
                             function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
                             {separator: rows.length > 0}));
+                    }
+
+                    // Ajouter successeur / prédécesseur
+                    if (isOnNode) {
+                        var targetProject = target.data('location') || '';
+                        var tpos = target.position();
+                        rows.push(menuRow("✚ Ajouter successeur", function(tp, px, py) {
+                            return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); };
+                        }(targetProject, tpos.x, tpos.y), {separator: true}));
+                        rows.push(menuRow("✚ Ajouter prédécesseur", function(tp, px, py) {
+                            return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); };
+                        }(targetProject, tpos.x, tpos.y)));
                     }
 
                     // Sélectionner tout le projet (si tous les noeuds sélectionnés sont dans le même groupe)
@@ -1439,6 +1565,45 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
+        extent = (viewport_debug or {}).get("extent")
+        return new_elements, new_meta, extent
+
+    if action == "create_node":
+        name = action_data.get("name", "").strip()
+        project = action_data.get("project", "").strip()
+        if not name or not project:
+            return dash.no_update, dash.no_update, dash.no_update
+        existing_ids = [int(k) for k in m.get("types_dict", {}).keys() if k.isdigit()]
+        new_id = str(max(existing_ids) + 1) if existing_ids else "1"
+        types_dict = dict(m.get("types_dict", {}))
+        raw_status = dict(m.get("raw_status_dict") or m.get("status_dict", {}))
+        location_dict = dict(m.get("location_dict", {}))
+        desc_dict = dict(m.get("desc_dict", {}))
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        types_dict[new_id] = "F"
+        raw_status[new_id] = "TODO"
+        location_dict[new_id] = project
+        desc_dict[new_id] = f"{new_id}: {name}"
+        pred_dict[new_id] = []
+        successor_of = action_data.get("successor_of")   # new_id vient APRÈS successor_of
+        if successor_of and successor_of in pred_dict:
+            pred_dict[new_id].append(successor_of)
+        predecessor_of = action_data.get("predecessor_of")  # new_id vient AVANT predecessor_of
+        if predecessor_of and predecessor_of in pred_dict:
+            pred_dict[predecessor_of] = pred_dict.get(predecessor_of, []) + [new_id]
+        base = dict(m)
+        base["types_dict"] = types_dict
+        base["raw_status_dict"] = raw_status
+        base["location_dict"] = location_dict
+        base["desc_dict"] = desc_dict
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
+        pos = action_data.get("position")
+        if isinstance(pos, dict) and "x" in pos and "y" in pos:
+            for el in new_elements:
+                if el.get("data", {}).get("id") == new_id:
+                    el["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
+                    break
         extent = (viewport_debug or {}).get("extent")
         return new_elements, new_meta, extent
 
