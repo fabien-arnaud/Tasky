@@ -954,6 +954,47 @@ clientside_callback(
                 if (e.key === 'Escape') hideCtxMenu();
             });
 
+            // --- Double-clic : zoom intelligent ---
+            var ZOOM_IN_LEVEL = 0.5;
+            var ZOOM_NEAR_THRESHOLD = 0.35;
+
+            window.cy.on('dbltap', function(evt) {
+                var target = evt.target;
+                var isBg = (target === window.cy);
+                var currentZoom = window.cy.zoom();
+                var pos = evt.position;
+
+                var clickedGroup = null;
+                if (isBg) {
+                    window.cy.nodes('[is_group = "True"]').each(function(n) {
+                        var bb = n.boundingBox();
+                        if (pos.x >= bb.x1 && pos.x <= bb.x2 && pos.y >= bb.y1 && pos.y <= bb.y2) {
+                            clickedGroup = n;
+                        }
+                    });
+                } else if (target.isNode()) {
+                    if (target.data('is_group') === 'True') {
+                        clickedGroup = target;
+                    } else {
+                        var parentId = target.data('parent');
+                        if (parentId) {
+                            var grpEl = window.cy.getElementById(parentId);
+                            if (grpEl && grpEl.length) clickedGroup = grpEl;
+                        }
+                    }
+                }
+
+                if (clickedGroup) {
+                    if (currentZoom >= ZOOM_NEAR_THRESHOLD) {
+                        window.cy.animate({ fit: { eles: clickedGroup, padding: 40 } }, { duration: 400 });
+                    } else {
+                        window.cy.animate({ zoom: { level: ZOOM_IN_LEVEL, position: pos } }, { duration: 400 });
+                    }
+                } else {
+                    window.cy.animate({ fit: { eles: window.cy.elements(), padding: 50 } }, { duration: 400 });
+                }
+            });
+
             // --- Utilitaires menu multi-niveaux ---
             function shortLabel(lbl) {
                 return (lbl || '').length > 28 ? (lbl || '').substring(0, 26) + '…' : (lbl || '');
