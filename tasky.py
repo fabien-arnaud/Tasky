@@ -1245,11 +1245,11 @@ clientside_callback(
                     // Suppression
                     if (nodeIds.length > 0 || edgeIds.length > 0) {
                         var parts = [];
-                        if (nodeIds.length === 1) parts.push("1 nœud");
-                        else if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
+                        if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
                         if (edgeIds.length === 1) parts.push("1 lien");
                         else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
-                        rows.push(menuRow("🗑 Supprimer " + parts.join(" et "),
+                        var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
+                        rows.push(menuRow(deleteLabel,
                             function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
                             {separator: rows.length > 0}));
                     }
