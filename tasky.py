@@ -718,14 +718,7 @@ def serve_layout():
     return html.Div(
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
-            html.Button("⋮", id="menu-btn", n_clicks=0, style={
-                "position": "fixed", "top": "6px", "left": "10px",
-                "zIndex": "1100", "fontSize": "22px", "lineHeight": "1",
-                "background": "white", "border": "1px solid #ccc",
-                "borderRadius": "6px", "padding": "2px 10px", "cursor": "pointer",
-                "boxShadow": "1px 2px 6px rgba(0,0,0,0.12)",
-            }),
-            dcc.Store(id="meta-store", data=meta),
+dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
             dcc.Store(id="restore-viewport-done", data=0),
@@ -862,13 +855,6 @@ clientside_callback(
                 window.dash_clientside.set_props('dragfree-trigger', {data: window._dragfreeCnt});
             });
 
-            // --- Toggle-select nœuds ---
-            window._hoverEl = null;
-            window.cy.on('mouseover', 'node, edge', function(evt) {
-                var el = evt.target;
-                var sel = el.isEdge() ? el.hasClass('edge-selected') : el.selected();
-                window._hoverEl = {id: el.id(), selected: sel};
-            });
             // --- Mode création de lien ---
             window._linkMode = null; // {id, dir} dir="suivant"|"précédent"
             function enterLinkMode(nodeId, dir) {
@@ -880,8 +866,18 @@ clientside_callback(
                 window.cy.container().style.cursor = '';
             }
 
+            window._preClickSelected = false;
+            window._tappedNodeId = null;
+            window._tapToggleTimer = null;
+            window.cy.on('tapstart', 'node', function(evt) {
+                if (evt.target.data('is_group') === 'True') return;
+                window.cy.selectionType('additive');
+                window._preClickSelected = evt.target.selected();
+                window._tappedNodeId = evt.target.id();
+            });
             window.cy.on('tap', 'node', function(evt) {
                 hideCtxMenu();
+                if (evt.target.data('is_group') === 'True') return;
                 if (window._linkMode) {
                     var clickedId = evt.target.id();
                     if (clickedId !== window._linkMode.id) {
@@ -892,80 +888,35 @@ clientside_callback(
                     exitLinkMode();
                     return;
                 }
-                var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
-                var wasSelected = window._hoverEl &&
-                                  window._hoverEl.id === evt.target.id() &&
-                                  window._hoverEl.selected;
-                if (!isShift && wasSelected) evt.target.unselect();
+                if (window._preClickSelected && evt.target.id() === window._tappedNodeId) {
+                    // Delayed toggle : annulé si dbltap arrive avant
+                    if (window._tapToggleTimer) clearTimeout(window._tapToggleTimer);
+                    var _el = evt.target;
+                    window._tapToggleTimer = setTimeout(function() {
+                        window._tapToggleTimer = null;
+                        _el.unselect();
+                    }, 300);
+                }
             });
 
             // --- Toggle-select arêtes ---
             window.cy.on('tap', 'edge', function(evt) {
                 hideCtxMenu();
                 if (window._linkSource) { exitLinkMode(); return; }
-                var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
                 var el = evt.target;
-                var wasSelected = window._hoverEl &&
-                                  window._hoverEl.id === el.id() &&
-                                  window._hoverEl.selected;
-                if (!isShift) {
-                    clearEdgeSelection();
-                    if (!wasSelected) selectEdge(el);
-                } else {
-                    if (wasSelected) deselectEdge(el);
-                    else selectEdge(el);
-                }
+                if (el.hasClass('edge-selected')) deselectEdge(el);
+                else selectEdge(el);
             });
 
             // Clic sur fond : effacer sélection + menu (+ annule mode lien)
             window.cy.on('tap', function(evt) {
-                if (evt.target === window.cy) { clearEdgeSelection(); hideCtxMenu(); exitLinkMode(); }
+                if (evt.target === window.cy) { clearEdgeSelection(); window.cy.$(':selected').unselect(); hideCtxMenu(); exitLinkMode(); }
             });
 
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); }
+                if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); }
             });
 
-            // --- Double-clic : zoom intelligent ---
-            var ZOOM_IN_LEVEL = 0.5;
-            var ZOOM_NEAR_THRESHOLD = 0.35;
-
-            window.cy.on('dbltap', function(evt) {
-                var target = evt.target;
-                var isBg = (target === window.cy);
-                var currentZoom = window.cy.zoom();
-                var pos = evt.position;
-
-                var clickedGroup = null;
-                if (isBg) {
-                    window.cy.nodes('[is_group = "True"]').each(function(n) {
-                        var bb = n.boundingBox();
-                        if (pos.x >= bb.x1 && pos.x <= bb.x2 && pos.y >= bb.y1 && pos.y <= bb.y2) {
-                            clickedGroup = n;
-                        }
-                    });
-                } else if (target.isNode()) {
-                    if (target.data('is_group') === 'True') {
-                        clickedGroup = target;
-                    } else {
-                        var parentId = target.data('parent');
-                        if (parentId) {
-                            var grpEl = window.cy.getElementById(parentId);
-                            if (grpEl && grpEl.length) clickedGroup = grpEl;
-                        }
-                    }
-                }
-
-                if (clickedGroup) {
-                    if (currentZoom >= ZOOM_NEAR_THRESHOLD) {
-                        window.cy.animate({ fit: { eles: clickedGroup, padding: 40 } }, { duration: 400 });
-                    } else {
-                        window.cy.animate({ zoom: { level: ZOOM_IN_LEVEL, position: pos } }, { duration: 400 });
-                    }
-                } else {
-                    window.cy.animate({ fit: { eles: window.cy.elements(), padding: 50 } }, { duration: 400 });
-                }
-            });
 
             // --- Utilitaires menu multi-niveaux ---
             function shortLabel(lbl) {
@@ -1160,22 +1111,32 @@ clientside_callback(
                 return rows;
             }
 
-            // --- Menu contextuel (clic droit) ---
-            window.cy.on('cxttap', function(evt) {
-                evt.originalEvent.preventDefault();
+            // --- Menu contextuel (clic droit / double-clic) ---
+            function handleContextMenu(evt) {
                 var target = evt.target;
                 var isBg = (target === window.cy);
 
                 if (!isBg) {
-                    if (target.isEdge()) selectEdge(target);
-                    else target.select();
+                    if (target.isEdge()) { if (!target.hasClass('edge-selected')) selectEdge(target); }
+                    else if (target.isNode() && target.data('is_group') !== 'True') { if (!target.selected()) target.select(); }
+                }
+
+                var oe = evt.originalEvent;
+                var x, y;
+                if (oe && oe.clientX !== undefined) {
+                    x = oe.clientX; y = oe.clientY;
+                } else if (oe && oe.changedTouches && oe.changedTouches.length) {
+                    x = oe.changedTouches[0].clientX; y = oe.changedTouches[0].clientY;
+                } else {
+                    var rp = evt.renderedPosition;
+                    var rect0 = window.cy.container().getBoundingClientRect();
+                    x = rect0.left + rp.x; y = rect0.top + rp.y;
                 }
 
                 var selEdges = window.cy.edges('.edge-selected');
                 var selNodes = window.cy.$(":selected").filter("node").not('[is_group = "True"]');
                 var edgeIds = selEdges.map(function(e){ return e.id(); });
                 var nodeIds = selNodes.map(function(n){ return n.id(); });
-                var x = evt.originalEvent.clientX, y = evt.originalEvent.clientY;
                 var isOnNode = !isBg && target.isNode() && target.data('is_group') !== 'True';
 
                 // --- Menu fond (clic droit dans le vide) ---
@@ -1277,61 +1238,38 @@ clientside_callback(
                 var mainRows = buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode);
                 if (mainRows.length === 0) { hideCtxMenu(); return; }
                 showMenu(mainRows, x, y);
+            }
+
+            window.cy.on('cxttap', function(evt) {
+                evt.originalEvent.preventDefault();
+                handleContextMenu(evt);
+            });
+            window.cy.on('dbltap', function(evt) {
+                var target = evt.target;
+                if (target === window.cy) {
+                    // Fond : zoom intelligent
+                    var ZOOM_IN_LEVEL = 0.5;
+                    var ZOOM_NEAR_THRESHOLD = 0.35;
+                    var currentZoom = window.cy.zoom();
+                    var pos = evt.position;
+                    var clickedGroup = null;
+                    window.cy.nodes('[is_group = "True"]').each(function(n) {
+                        var bb = n.boundingBox();
+                        if (pos.x >= bb.x1 && pos.x <= bb.x2 && pos.y >= bb.y1 && pos.y <= bb.y2) clickedGroup = n;
+                    });
+                    if (clickedGroup) {
+                        if (currentZoom >= ZOOM_NEAR_THRESHOLD) window.cy.animate({ fit: { eles: clickedGroup, padding: 40 } }, { duration: 400 });
+                        else window.cy.animate({ zoom: { level: ZOOM_IN_LEVEL, position: pos } }, { duration: 400 });
+                    } else {
+                        window.cy.animate({ fit: { eles: window.cy.elements(), padding: 50 } }, { duration: 400 });
+                    }
+                } else {
+                    // Nœud ou arête : annule le toggle tap en attente, puis menu contextuel
+                    if (window._tapToggleTimer) { clearTimeout(window._tapToggleTimer); window._tapToggleTimer = null; }
+                    handleContextMenu(evt);
+                }
             });
 
-            // Bouton ⋮ : ouvre le menu contextuel basé sur la sélection courante
-            var menuBtn = document.getElementById('menu-btn');
-            if (menuBtn && !menuBtn._bound) {
-                menuBtn._bound = true;
-                menuBtn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    var btnRect = menuBtn.getBoundingClientRect();
-                    var mx = btnRect.left, my = btnRect.bottom + 4;
-
-                    var selEdges = window.cy.edges('.edge-selected');
-                    var selNodes = window.cy.$(":selected").filter("node").not('[is_group = "True"]');
-                    var nodeIds = selNodes.map(function(n){ return n.id(); });
-                    var edgeIds = selEdges.map(function(e){ return e.id(); });
-
-                    if (nodeIds.length > 0 || edgeIds.length > 0) {
-                        var target = selNodes.length > 0 ? selNodes[0] : selEdges[0];
-                        var isOnNode = selNodes.length > 0;
-                        var rows = buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode);
-                        if (rows.length > 0) showMenu(rows, mx, my);
-                    } else {
-                        var projects = window.cy.nodes('[is_group = "True"]')
-                            .map(function(n){ return n.data('label'); })
-                            .filter(function(l){ return !!l; }).sort();
-                        var bgRows = [];
-                        bgRows.push(menuRow("✚ Nouvelle tâche…", function() {
-                            renderMenu([menuRow("← retour", function(){ renderMenu(bgRows); })]);
-                            var projInp = document.createElement('select');
-                            projInp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                            projects.forEach(function(p){
-                                var opt = document.createElement('option');
-                                opt.value = p; opt.textContent = p;
-                                projInp.appendChild(opt);
-                            });
-                            ctxMenu.appendChild(projInp);
-                            var taskInp = document.createElement('input');
-                            taskInp.type = 'text'; taskInp.placeholder = 'Nom de la tâche';
-                            taskInp.style.cssText = 'margin:4px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                            ctxMenu.appendChild(taskInp);
-                            var btnC = document.createElement('button');
-                            btnC.textContent = 'Créer';
-                            btnC.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
-                            btnC.onclick = function(){
-                                var pv=projInp.value, tv=taskInp.value.trim();
-                                if(pv && tv) dispatch({action:"create_node", name:tv, project:pv, position:{x:200,y:200}});
-                            };
-                            ctxMenu.appendChild(btnC);
-                            taskInp.focus();
-                            taskInp.onkeydown = function(e){ if(e.key==='Enter') btnC.onclick(); };
-                        }));
-                        if (bgRows.length > 0) showMenu(bgRows, mx, my);
-                    }
-                });
-            }
         }
 
         // Enregistre les handlers dès que cy est prêt (avec retries si pas encore initialisé)
