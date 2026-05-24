@@ -717,7 +717,14 @@ def serve_layout():
     initial_layout = {"name": "preset"} if has_preset else {"name": "cose-bilkent"}
     return html.Div(
         [
-            html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "margin": "5px 0 10px 10px", "display": "block"}),
+            html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
+            html.Button("⋮", id="menu-btn", n_clicks=0, style={
+                "position": "fixed", "top": "6px", "right": "10px",
+                "zIndex": "1100", "fontSize": "22px", "lineHeight": "1",
+                "background": "white", "border": "1px solid #ccc",
+                "borderRadius": "6px", "padding": "2px 10px", "cursor": "pointer",
+                "boxShadow": "1px 2px 6px rgba(0,0,0,0.12)",
+            }),
             dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
@@ -727,7 +734,7 @@ def serve_layout():
                 id="planning-graph",
                 elements=elements,
                 layout=initial_layout,
-                style={"width": "100%", "height": "calc(100vh - 40px)", "border": "1px solid #ccc"},
+                style={"width": "100%", "height": "100vh", "border": "none"},
                 stylesheet=CYTOSCAPE_STYLESHEET,
                 boxSelectionEnabled=True,
             ),
@@ -750,7 +757,7 @@ def serve_layout():
             html.Button(id="ctx-confirm-btn", n_clicks=0, style={"display": "none"}),
             dcc.Store(id="ctx-action", data=None),
         ],
-        style={"width": "100%", "height": "100vh", "padding": "10px", "backgroundColor": BG_COLOR},
+        style={"width": "100%", "height": "100vh", "padding": "0", "margin": "0", "overflow": "hidden", "backgroundColor": BG_COLOR},
     )
 
 
@@ -999,6 +1006,160 @@ clientside_callback(
                 }, 0);
             }
 
+            function buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode) {
+                var rows = [];
+
+                var showNewNodeForm = function(actionObj) {
+                    renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
+                    var inp = document.createElement('input');
+                    inp.type = 'text'; inp.placeholder = 'Nom de la tâche';
+                    inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                    ctxMenu.appendChild(inp);
+                    var btn = document.createElement('button');
+                    btn.textContent = 'Valider';
+                    btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                    btn.onclick = function() {
+                        var v = inp.value.trim();
+                        if (v) dispatch(Object.assign({name: v}, actionObj));
+                    };
+                    ctxMenu.appendChild(btn);
+                    inp.focus();
+                    inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                };
+
+                if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
+                    var lnkId = target.id();
+                    rows.push(menuRow("➜ Suivant", function(id) {
+                        return function() { hideCtxMenu(); enterLinkMode(id, 'suivant'); };
+                    }(lnkId)));
+                    rows.push(menuRow("➜ Précédent", function(id) {
+                        return function() { hideCtxMenu(); enterLinkMode(id, 'précédent'); };
+                    }(lnkId)));
+                    var sepEl = document.createElement('div');
+                    sepEl.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;';
+                    rows.push(sepEl);
+                }
+
+                if (isOnNode) {
+                    var otherSel = selNodes.not('#' + target.id());
+                    if (otherSel.length === 1) {
+                        var other = otherSel[0];
+                        var otherLbl = shortLabel(other.data('label') || other.id());
+                        rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
+                        rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
+                    }
+                }
+
+                if (isOnNode && nodeIds.length > 0) {
+                    rows.push(menuRow("● Statut ▶", function() {
+                        renderMenu([
+                            menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); }),
+                            menuRow("TODO",     function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }),
+                            menuRow("PRIO ⭐",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }),
+                            menuRow("DONE ✓",   function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }),
+                        ]);
+                    }));
+                }
+
+                if (isOnNode && nodeIds.length === 1) {
+                    rows.push(menuRow("✏ Renommer", function() {
+                        var currentDesc = (target.data('label') || '').replace(/^[0-9]+: */, '');
+                        renderMenu([
+                            menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); }),
+                        ]);
+                        var inp = document.createElement('input');
+                        inp.type = 'text'; inp.value = currentDesc;
+                        inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                        ctxMenu.appendChild(inp);
+                        var btn = document.createElement('button');
+                        btn.textContent = 'Valider';
+                        btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                        btn.onclick = function() {
+                            var v = inp.value.trim();
+                            if (v) dispatch({action:"rename_node", node_id:nodeIds[0], new_name:v});
+                        };
+                        ctxMenu.appendChild(btn);
+                        inp.focus(); inp.select();
+                        inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                    }));
+                }
+
+                if (isOnNode && nodeIds.length > 0) {
+                    rows.push(menuRow("📁 Par projet ▶", function() {
+                        var projects = window.cy.nodes('[is_group = "True"]')
+                            .map(function(n){ return n.data('label'); })
+                            .filter(function(l){ return !!l; })
+                            .sort();
+                        var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })];
+                        projects.forEach(function(proj) {
+                            subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
+                        });
+                        subRows.push(menuRow("✚ Nouveau projet…", function() {
+                            renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
+                            var inp = document.createElement('input');
+                            inp.type = 'text'; inp.placeholder = 'Nom du projet';
+                            inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                            ctxMenu.appendChild(inp);
+                            var btn = document.createElement('button');
+                            btn.textContent = 'Valider';
+                            btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                            btn.onclick = function() {
+                                var v = inp.value.trim();
+                                if (v) dispatch({action:"move_node", node_ids:nodeIds, project:v});
+                            };
+                            ctxMenu.appendChild(btn);
+                            inp.focus();
+                            inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                        }, {separator: true}));
+                        renderMenu(subRows);
+                    }));
+                }
+
+                if (nodeIds.length > 0 || edgeIds.length > 0) {
+                    var parts = [];
+                    if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
+                    if (edgeIds.length === 1) parts.push("1 lien");
+                    else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
+                    var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
+                    rows.push(menuRow(deleteLabel,
+                        function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
+                        {separator: rows.length > 0}));
+                }
+
+                if (isOnNode) {
+                    var targetProject = target.data('location') || '';
+                    var tpos = target.position();
+                    rows.push(menuRow("✚ Créer suivant", function(tp, px, py) {
+                        return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); };
+                    }(targetProject, tpos.x, tpos.y), {separator: true}));
+                    rows.push(menuRow("✚ Créer précédent", function(tp, px, py) {
+                        return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); };
+                    }(targetProject, tpos.x, tpos.y)));
+                }
+
+                if (nodeIds.length > 0) {
+                    var parents = selNodes.map(function(n){ return n.data('parent') || ''; });
+                    var uniqueParent = parents[0];
+                    var sameGroup = uniqueParent && parents.every(function(p){ return p === uniqueParent; });
+                    if (sameGroup) {
+                        var groupLbl = uniqueParent.replace('group::', '');
+                        var groupChildren = window.cy.nodes().filter(function(n) {
+                            return n.data('parent') === uniqueParent && n.data('is_group') !== 'True';
+                        });
+                        rows.push(menuRow("☑ Sélectionner " + groupLbl, function() {
+                            hideCtxMenu();
+                            setTimeout(function() {
+                                window.cy.$(':selected').unselect();
+                                clearEdgeSelection();
+                                groupChildren.select();
+                            }, 50);
+                        }, {separator: true}));
+                    }
+                }
+
+                return rows;
+            }
+
             // --- Menu contextuel (clic droit) ---
             window.cy.on('cxttap', function(evt) {
                 evt.originalEvent.preventDefault();
@@ -1113,172 +1274,64 @@ clientside_callback(
                     return;
                 }
 
-                function buildMainMenu() {
-                    var rows = [];
-
-                    var showNewNodeForm = function(actionObj) {
-                        renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu()); })]);
-                        var inp = document.createElement('input');
-                        inp.type = 'text'; inp.placeholder = 'Nom de la tâche';
-                        inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                        ctxMenu.appendChild(inp);
-                        var btn = document.createElement('button');
-                        btn.textContent = 'Valider';
-                        btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
-                        btn.onclick = function() {
-                            var v = inp.value.trim();
-                            if (v) dispatch(Object.assign({name: v}, actionObj));
-                        };
-                        ctxMenu.appendChild(btn);
-                        inp.focus();
-                        inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
-                    };
-
-                    // Ajouter suivant / précédent (mode lien interactif, 1 nœud)
-                    if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
-                        var lnkId = target.id();
-                        rows.push(menuRow("➜ Suivant", function(id) {
-                            return function() { hideCtxMenu(); enterLinkMode(id, 'suivant'); };
-                        }(lnkId)));
-                        rows.push(menuRow("➜ Précédent", function(id) {
-                            return function() { hideCtxMenu(); enterLinkMode(id, 'précédent'); };
-                        }(lnkId)));
-                        var sepEl = document.createElement('div');
-                        sepEl.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;';
-                        rows.push(sepEl);
-                    }
-
-                    // Création de lien (2 nœuds sélectionnés)
-                    if (isOnNode) {
-                        var otherSel = selNodes.not('#' + target.id());
-                        if (otherSel.length === 1) {
-                            var other = otherSel[0];
-                            var otherLbl = shortLabel(other.data('label') || other.id());
-                            rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
-                            rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
-                        }
-                    }
-
-                    // Statut (nœuds sélectionnés)
-                    if (isOnNode && nodeIds.length > 0) {
-                        rows.push(menuRow("● Statut ▶", function() {
-                            renderMenu([
-                                menuRow("← retour", function(){ renderMenu(buildMainMenu()); }),
-                                menuRow("TODO",     function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }),
-                                menuRow("PRIO ⭐",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }),
-                                menuRow("DONE ✓",   function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }),
-                            ]);
-                        }));
-                    }
-
-                    // Renommer (sélection unique)
-                    if (isOnNode && nodeIds.length === 1) {
-                        rows.push(menuRow("✏ Renommer", function() {
-                            var currentDesc = (target.data('label') || '').replace(/^[0-9]+: */, '');
-                            renderMenu([
-                                menuRow("← retour", function(){ renderMenu(buildMainMenu()); }),
-                            ]);
-                            var inp = document.createElement('input');
-                            inp.type = 'text'; inp.value = currentDesc;
-                            inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                            ctxMenu.appendChild(inp);
-                            var btn = document.createElement('button');
-                            btn.textContent = 'Valider';
-                            btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
-                            btn.onclick = function() {
-                                var v = inp.value.trim();
-                                if (v) dispatch({action:"rename_node", node_id:nodeIds[0], new_name:v});
-                            };
-                            ctxMenu.appendChild(btn);
-                            inp.focus(); inp.select();
-                            inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
-                        }));
-                    }
-
-                    // Par projet
-                    if (isOnNode && nodeIds.length > 0) {
-                        rows.push(menuRow("📁 Par projet ▶", function() {
-                            var projects = window.cy.nodes('[is_group = "True"]')
-                                .map(function(n){ return n.data('label'); })
-                                .filter(function(l){ return !!l; })
-                                .sort();
-                            var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu()); })];
-                            projects.forEach(function(proj) {
-                                subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
-                            });
-                            subRows.push(menuRow("✚ Nouveau projet…", function() {
-                                renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu()); })]);
-                                var inp = document.createElement('input');
-                                inp.type = 'text'; inp.placeholder = 'Nom du projet';
-                                inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                                ctxMenu.appendChild(inp);
-                                var btn = document.createElement('button');
-                                btn.textContent = 'Valider';
-                                btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
-                                btn.onclick = function() {
-                                    var v = inp.value.trim();
-                                    if (v) dispatch({action:"move_node", node_ids:nodeIds, project:v});
-                                };
-                                ctxMenu.appendChild(btn);
-                                inp.focus();
-                                inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
-                            }, {separator: true}));
-                            renderMenu(subRows);
-                        }));
-                    }
-
-                    // Suppression
-                    if (nodeIds.length > 0 || edgeIds.length > 0) {
-                        var parts = [];
-                        if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
-                        if (edgeIds.length === 1) parts.push("1 lien");
-                        else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
-                        var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
-                        rows.push(menuRow(deleteLabel,
-                            function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
-                            {separator: rows.length > 0}));
-                    }
-
-                    // Créer suivant / précédent (nouveau nœud)
-                    if (isOnNode) {
-                        var targetProject = target.data('location') || '';
-                        var tpos = target.position();
-                        rows.push(menuRow("✚ Créer suivant", function(tp, px, py) {
-                            return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); };
-                        }(targetProject, tpos.x, tpos.y), {separator: true}));
-                        rows.push(menuRow("✚ Créer précédent", function(tp, px, py) {
-                            return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); };
-                        }(targetProject, tpos.x, tpos.y)));
-                    }
-
-                    // Sélectionner tout le projet (si tous les noeuds sélectionnés sont dans le même groupe)
-                    if (nodeIds.length > 0) {
-                        var parents = selNodes.map(function(n){ return n.data('parent') || ''; });
-                        var uniqueParent = parents[0];
-                        var sameGroup = uniqueParent && parents.every(function(p){ return p === uniqueParent; });
-                        if (sameGroup) {
-                            var groupLbl = uniqueParent.replace('group::', '');
-                            var groupChildren = window.cy.nodes().filter(function(n) {
-                                return n.data('parent') === uniqueParent && n.data('is_group') !== 'True';
-                            });
-                            rows.push(menuRow("☑ Sélectionner " + groupLbl, function() {
-                                hideCtxMenu();
-                                setTimeout(function() {
-                                    window.cy.$(':selected').unselect();
-                                    clearEdgeSelection();
-                                    groupChildren.select();
-                                }, 50);
-                            }, {separator: true}));
-                        }
-                    }
-
-                    return rows;
-                }
-
-                var mainRows = buildMainMenu();
+                var mainRows = buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode);
                 if (mainRows.length === 0) { hideCtxMenu(); return; }
                 showMenu(mainRows, x, y);
             });
+
+            // Bouton ⋮ : ouvre le menu contextuel basé sur la sélection courante
+            var menuBtn = document.getElementById('menu-btn');
+            if (menuBtn && !menuBtn._bound) {
+                menuBtn._bound = true;
+                menuBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var btnRect = menuBtn.getBoundingClientRect();
+                    var mx = btnRect.left, my = btnRect.bottom + 4;
+
+                    var selEdges = window.cy.edges('.edge-selected');
+                    var selNodes = window.cy.$(":selected").filter("node").not('[is_group = "True"]');
+                    var nodeIds = selNodes.map(function(n){ return n.id(); });
+                    var edgeIds = selEdges.map(function(e){ return e.id(); });
+
+                    if (nodeIds.length > 0 || edgeIds.length > 0) {
+                        var target = selNodes.length > 0 ? selNodes[0] : selEdges[0];
+                        var isOnNode = selNodes.length > 0;
+                        var rows = buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode);
+                        if (rows.length > 0) showMenu(rows, mx, my);
+                    } else {
+                        var projects = window.cy.nodes('[is_group = "True"]')
+                            .map(function(n){ return n.data('label'); })
+                            .filter(function(l){ return !!l; }).sort();
+                        var bgRows = [];
+                        bgRows.push(menuRow("✚ Nouvelle tâche…", function() {
+                            renderMenu([menuRow("← retour", function(){ renderMenu(bgRows); })]);
+                            var projInp = document.createElement('select');
+                            projInp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                            projects.forEach(function(p){
+                                var opt = document.createElement('option');
+                                opt.value = p; opt.textContent = p;
+                                projInp.appendChild(opt);
+                            });
+                            ctxMenu.appendChild(projInp);
+                            var taskInp = document.createElement('input');
+                            taskInp.type = 'text'; taskInp.placeholder = 'Nom de la tâche';
+                            taskInp.style.cssText = 'margin:4px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                            ctxMenu.appendChild(taskInp);
+                            var btnC = document.createElement('button');
+                            btnC.textContent = 'Créer';
+                            btnC.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                            btnC.onclick = function(){
+                                var pv=projInp.value, tv=taskInp.value.trim();
+                                if(pv && tv) dispatch({action:"create_node", name:tv, project:pv, position:{x:200,y:200}});
+                            };
+                            ctxMenu.appendChild(btnC);
+                            taskInp.focus();
+                            taskInp.onkeydown = function(e){ if(e.key==='Enter') btnC.onclick(); };
+                        }));
+                        if (bgRows.length > 0) showMenu(bgRows, mx, my);
+                    }
+                });
+            }
         }
 
         // Enregistre les handlers dès que cy est prêt (avec retries si pas encore initialisé)
