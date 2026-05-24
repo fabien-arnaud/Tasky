@@ -719,7 +719,7 @@ def serve_layout():
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
             html.Button("⋮", id="menu-btn", n_clicks=0, style={
-                "position": "fixed", "top": "6px", "right": "10px",
+                "position": "fixed", "top": "6px", "left": "10px",
                 "zIndex": "1100", "fontSize": "22px", "lineHeight": "1",
                 "background": "white", "border": "1px solid #ccc",
                 "borderRadius": "6px", "padding": "2px 10px", "cursor": "pointer",
