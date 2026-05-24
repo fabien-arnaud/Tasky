@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+VERSION = "1.0.1"
+
 import base64
 import copy
 import os
@@ -705,7 +707,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
 ]
 
 
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, title=f"Tasky {VERSION}")
 server = app.server  # exposition pour gunicorn
 
 
@@ -718,7 +720,8 @@ def serve_layout():
     return html.Div(
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
-dcc.Store(id="meta-store", data=meta),
+            html.Span(VERSION, style={"font-size": "11px", "color": "#bbb", "position": "fixed", "bottom": "6px", "right": "10px", "zIndex": "1100", "pointerEvents": "none"}),
+            dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
             dcc.Store(id="restore-viewport-done", data=0),
