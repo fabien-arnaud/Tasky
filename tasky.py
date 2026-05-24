@@ -704,6 +704,11 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "selector": "edge[?source_done]",
         "style": {"opacity": 0.3},
     },
+    # Highlight chemin (taphold)
+    {"selector": ".hl-faded", "style": {"opacity": 0.12}},
+    {"selector": ".hl-focus", "style": {"border-width": 5, "border-color": "#FF8800"}},
+    {"selector": ".hl-pred",  "style": {"border-width": 3, "border-color": "#4488FF"}},
+    {"selector": ".hl-succ",  "style": {"border-width": 3, "border-color": "#44BB44"}},
 ]
 
 
@@ -869,6 +874,49 @@ clientside_callback(
                 window.cy.container().style.cursor = '';
             }
 
+            // --- Highlight chemin (taphold) ---
+            window._hlNode = null;
+            window._hlDepth = 0;
+            function applyHighlight(nodeId, depth) {
+                window.cy.elements().removeClass('hl-faded hl-focus hl-pred hl-succ');
+                var focus = window.cy.getElementById(nodeId);
+                var highlighted = window.cy.collection().merge(focus);
+                var frontier = focus;
+                for (var d = 0; d < depth; d++) {
+                    var inc = frontier.incomers();
+                    if (!inc.length) break;
+                    highlighted = highlighted.merge(inc);
+                    inc.nodes().addClass('hl-pred');
+                    frontier = inc.nodes();
+                }
+                frontier = focus;
+                for (var d = 0; d < depth; d++) {
+                    var out = frontier.outgoers();
+                    if (!out.length) break;
+                    highlighted = highlighted.merge(out);
+                    out.nodes().addClass('hl-succ');
+                    frontier = out.nodes();
+                }
+                window.cy.elements().not(highlighted).addClass('hl-faded');
+                focus.addClass('hl-focus');
+            }
+            function exitHighlightMode() {
+                window.cy.elements().removeClass('hl-faded hl-focus hl-pred hl-succ');
+                window._hlNode = null;
+                window._hlDepth = 0;
+            }
+            window.cy.on('taphold', 'node', function(evt) {
+                if (evt.target.data('is_group') === 'True') return;
+                var nodeId = evt.target.id();
+                if (window._hlNode === nodeId) {
+                    window._hlDepth += 1;
+                } else {
+                    window._hlNode = nodeId;
+                    window._hlDepth = 1;
+                }
+                applyHighlight(nodeId, window._hlDepth);
+            });
+
             window._preClickSelected = false;
             window._tappedNodeId = null;
             window._tapToggleTimer = null;
@@ -913,11 +961,11 @@ clientside_callback(
 
             // Clic sur fond : effacer sélection + menu (+ annule mode lien)
             window.cy.on('tap', function(evt) {
-                if (evt.target === window.cy) { clearEdgeSelection(); window.cy.$(':selected').unselect(); hideCtxMenu(); exitLinkMode(); }
+                if (evt.target === window.cy) { clearEdgeSelection(); window.cy.$(':selected').unselect(); hideCtxMenu(); exitLinkMode(); exitHighlightMode(); }
             });
 
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); }
+                if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); exitHighlightMode(); }
             });
 
 
