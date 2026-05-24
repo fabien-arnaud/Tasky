@@ -1,16 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Version Dash / Cytoscape du planning.
-
-Étapes actuelles :
-- lecture de tasks_interactif.csv
-- calcul des statuts (même logique que Planning.py)
-- construction des nœuds / arêtes pour un graphe interactif
-- app Dash avec :
-  - affichage du graphe
-  - surlignage interactif ancêtres / descendants
-  - sauvegarde / rechargement de la position des nœuds
-"""
 
 import base64
 import copy
@@ -373,25 +361,6 @@ def build_model_from_csv() -> Tuple[List[dict], dict]:
     return elements, meta
 
 
-def reload_meta_from_csv() -> dict:
-    """Recharge les dictionnaires et recalcule les statuts sans reconstruire les éléments (pour mise à jour légère)."""
-    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv()
-    raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
-    count_lockers, priority_paths_tasks = compute_statuses(
-        types_dict, status_dict, location_dict, pred_dict, follow_dict
-    )
-    return {
-        "types_dict": types_dict,
-        "status_dict": status_dict,
-        "raw_status_dict": raw_status_dict,
-        "location_dict": location_dict,
-        "desc_dict": desc_dict,
-        "pred_dict": pred_dict,
-        "follow_dict": follow_dict,
-        "count_lockers": count_lockers,
-        "priority_paths_tasks": priority_paths_tasks,
-    }
-
 
 def _edge_visible_in_style(
     source: str, target: str, meta: dict
@@ -600,28 +569,6 @@ def save_csv_from_meta(meta: dict) -> None:
     _gh.write_text("tasks.csv", buf.getvalue(), message="update tasks")
 
 
-def update_predecessors_in_csv(
-    csv_path: str, task_id: str, new_pred_list: List[str]
-) -> None:
-    """
-    Met à jour la colonne 'predecessors' pour la tâche task_id dans le CSV.
-    new_pred_list : liste d'ids de prédécesseurs (séparateur '-' à l'écriture).
-    """
-    rows: List[Dict[str, str]] = []
-    with open(csv_path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or [
-            "id", "type", "status", "location", "description", "predecessors"
-        ]
-        for row in reader:
-            if row.get("id", "").strip() == str(task_id).strip():
-                row["predecessors"] = "-".join(str(p).strip() for p in new_pred_list if p)
-            rows.append(row)
-    with open(csv_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
 
 def _would_create_cycle(
     pred_dict: Dict[str, List[str]], new_pred: str, successor_id: str
@@ -770,51 +717,17 @@ def serve_layout():
     initial_layout = {"name": "preset"} if has_preset else {"name": "cose-bilkent"}
     return html.Div(
         [
-            html.Div(
-                [
-                    html.Button(
-                        "Sauver les positions",
-                        id="save-positions",
-                        n_clicks=0,
-                        style={"margin-right": "10px"},
-                    ),
-                    html.Button(
-                        "Annuler",
-                        id="undo-positions",
-                        n_clicks=0,
-                        style={"margin-right": "10px"},
-                    ),
-                    html.Button(
-                        "Autosave : ON",
-                        id="autosave-btn",
-                        n_clicks=0,
-                        style={"margin-right": "10px"},
-                    ),
-                    html.Button(
-                        "Snap : ON",
-                        id="snap-btn",
-                        n_clicks=0,
-                        title="Active/désactive le snap sur grille virtuelle",
-                        style={"margin-right": "10px"},
-                    ),
-                    html.Span(id="save-status", style={"font-size": "12px", "margin-right": "15px"}),
-                ],
-                style={"margin": "5px 0 10px 0", "display": "flex", "alignItems": "center", "flexWrap": "wrap"},
-            ),
+            html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "margin": "5px 0 10px 10px", "display": "block"}),
             dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
             dcc.Store(id="restore-viewport-done", data=0),
-            dcc.Store(id="position-history", data=[]),
-            dcc.Store(id="autosave-enabled", data=False),
-            dcc.Interval(id="auto-save-interval", interval=10 * 1000, n_intervals=0),
-            dcc.Interval(id="countdown-interval", interval=1000, n_intervals=0),
-            dcc.Store(id="next-autosave-ts", data=0),
+            dcc.Store(id="dragfree-trigger", data=0),
             cyto.Cytoscape(
                 id="planning-graph",
                 elements=elements,
                 layout=initial_layout,
-                style={"width": "100%", "height": "800px", "border": "1px solid #ccc"},
+                style={"width": "100%", "height": "calc(100vh - 40px)", "border": "1px solid #ccc"},
                 stylesheet=CYTOSCAPE_STYLESHEET,
                 boxSelectionEnabled=True,
             ),
@@ -904,7 +817,7 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks) {
+    function(_id) {
         var ctxMenu = document.getElementById('context-menu');
 
         function hideCtxMenu() { if (ctxMenu) ctxMenu.style.display = 'none'; }
@@ -927,17 +840,19 @@ clientside_callback(
             window._cyHandlersRegistered = true;
 
             // --- Snap on dragfree ---
-            window._snapEnabled = true;
-            window._snapGridSize = 40;
+            var SNAP_GRID = 40;
+            window._dragfreeCnt = 0;
             window.cy.on('dragfree', 'node', function(evt) {
-                if (!window._snapEnabled) return;
                 var node = evt.target;
                 if (node.data('is_group') === 'True') return;
                 var pos = node.position();
                 node.position({
-                    x: Math.round(pos.x / window._snapGridSize) * window._snapGridSize,
-                    y: Math.round(pos.y / window._snapGridSize) * window._snapGridSize
+                    x: Math.round(pos.x / SNAP_GRID) * SNAP_GRID,
+                    y: Math.round(pos.y / SNAP_GRID) * SNAP_GRID
                 });
+                // Déclenche la sauvegarde des positions côté serveur
+                window._dragfreeCnt = (window._dragfreeCnt || 0) + 1;
+                window.dash_clientside.set_props('dragfree-trigger', {data: window._dragfreeCnt});
             });
 
             // --- Toggle-select nœuds ---
@@ -947,8 +862,29 @@ clientside_callback(
                 var sel = el.isEdge() ? el.hasClass('edge-selected') : el.selected();
                 window._hoverEl = {id: el.id(), selected: sel};
             });
+            // --- Mode création de lien ---
+            window._linkMode = null; // {id, dir} dir="suivant"|"précédent"
+            function enterLinkMode(nodeId, dir) {
+                window._linkMode = {id: nodeId, dir: dir};
+                window.cy.container().style.cursor = 'crosshair';
+            }
+            function exitLinkMode() {
+                window._linkMode = null;
+                window.cy.container().style.cursor = '';
+            }
+
             window.cy.on('tap', 'node', function(evt) {
                 hideCtxMenu();
+                if (window._linkMode) {
+                    var clickedId = evt.target.id();
+                    if (clickedId !== window._linkMode.id) {
+                        var src = window._linkMode.dir === 'suivant' ? window._linkMode.id : clickedId;
+                        var tgt = window._linkMode.dir === 'suivant' ? clickedId : window._linkMode.id;
+                        dispatch({action: "create_edge", source: src, target: tgt});
+                    }
+                    exitLinkMode();
+                    return;
+                }
                 var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
                 var wasSelected = window._hoverEl &&
                                   window._hoverEl.id === evt.target.id() &&
@@ -959,6 +895,7 @@ clientside_callback(
             // --- Toggle-select arêtes ---
             window.cy.on('tap', 'edge', function(evt) {
                 hideCtxMenu();
+                if (window._linkSource) { exitLinkMode(); return; }
                 var isShift = evt.originalEvent && evt.originalEvent.shiftKey;
                 var el = evt.target;
                 var wasSelected = window._hoverEl &&
@@ -973,13 +910,13 @@ clientside_callback(
                 }
             });
 
-            // Clic sur fond : effacer sélection + menu
+            // Clic sur fond : effacer sélection + menu (+ annule mode lien)
             window.cy.on('tap', function(evt) {
-                if (evt.target === window.cy) { clearEdgeSelection(); hideCtxMenu(); }
+                if (evt.target === window.cy) { clearEdgeSelection(); hideCtxMenu(); exitLinkMode(); }
             });
 
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') hideCtxMenu();
+                if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); }
             });
 
             // --- Double-clic : zoom intelligent ---
@@ -1197,7 +1134,21 @@ clientside_callback(
                         inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
                     };
 
-                    // Création de lien
+                    // Ajouter suivant / précédent (mode lien interactif, 1 nœud)
+                    if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
+                        var lnkId = target.id();
+                        rows.push(menuRow("➜ Suivant", function(id) {
+                            return function() { hideCtxMenu(); enterLinkMode(id, 'suivant'); };
+                        }(lnkId)));
+                        rows.push(menuRow("➜ Précédent", function(id) {
+                            return function() { hideCtxMenu(); enterLinkMode(id, 'précédent'); };
+                        }(lnkId)));
+                        var sepEl = document.createElement('div');
+                        sepEl.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;';
+                        rows.push(sepEl);
+                    }
+
+                    // Création de lien (2 nœuds sélectionnés)
                     if (isOnNode) {
                         var otherSel = selNodes.not('#' + target.id());
                         if (otherSel.length === 1) {
@@ -1244,9 +1195,9 @@ clientside_callback(
                         }));
                     }
 
-                    // Déplacer vers un projet
+                    // Par projet
                     if (isOnNode && nodeIds.length > 0) {
-                        rows.push(menuRow("📁 Déplacer ▶", function() {
+                        rows.push(menuRow("📁 Par projet ▶", function() {
                             var projects = window.cy.nodes('[is_group = "True"]')
                                 .map(function(n){ return n.data('label'); })
                                 .filter(function(l){ return !!l; })
@@ -1288,14 +1239,14 @@ clientside_callback(
                             {separator: rows.length > 0}));
                     }
 
-                    // Ajouter successeur / prédécesseur
+                    // Créer suivant / précédent (nouveau nœud)
                     if (isOnNode) {
                         var targetProject = target.data('location') || '';
                         var tpos = target.position();
-                        rows.push(menuRow("✚ Ajouter successeur", function(tp, px, py) {
+                        rows.push(menuRow("✚ Créer suivant", function(tp, px, py) {
                             return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); };
                         }(targetProject, tpos.x, tpos.y), {separator: true}));
-                        rows.push(menuRow("✚ Ajouter prédécesseur", function(tp, px, py) {
+                        rows.push(menuRow("✚ Créer précédent", function(tp, px, py) {
                             return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); };
                         }(targetProject, tpos.x, tpos.y)));
                     }
@@ -1336,14 +1287,12 @@ clientside_callback(
             setTimeout(registerHandlers, 300);
             setTimeout(registerHandlers, 800);
         }
-
-        if (!n_clicks) return "Snap : ON";
-        window._snapEnabled = !window._snapEnabled;
-        return window._snapEnabled ? "Snap : ON" : "Snap : OFF";
+        return window.dash_clientside.no_update;
     }
     """,
-    Output("snap-btn", "children"),
-    Input("snap-btn", "n_clicks"),
+    Output("restore-viewport-done", "data", allow_duplicate=True),
+    Input("planning-graph", "id"),
+    prevent_initial_call="initial_duplicate",
 )
 
 clientside_callback(
@@ -1358,38 +1307,6 @@ clientside_callback(
     Output("ctx-action", "data"),
     Input("ctx-confirm-btn", "n_clicks"),
     prevent_initial_call=True,
-)
-
-clientside_callback(
-    """
-    function(n_clicks) {
-        if (!n_clicks) return [false, "Autosave : OFF"];
-        var enabled = n_clicks % 2 !== 0;
-        return [enabled, enabled ? "Autosave : ON" : "Autosave : OFF"];
-    }
-    """,
-    [Output("autosave-enabled", "data"), Output("autosave-btn", "children")],
-    Input("autosave-btn", "n_clicks"),
-)
-
-clientside_callback(
-    "function(n) { return Date.now() + 10000; }",
-    Output("next-autosave-ts", "data"),
-    Input("auto-save-interval", "n_intervals"),
-)
-
-clientside_callback(
-    """
-    function(n, nextTs, enabled) {
-        if (!enabled) return "Sauver les positions";
-        if (!nextTs) return "Sauver les positions";
-        var remaining = Math.max(0, Math.round((nextTs - Date.now()) / 1000));
-        return "Sauver (auto " + remaining + "s)";
-    }
-    """,
-    Output("save-positions", "children"),
-    Input("countdown-interval", "n_intervals"),
-    [State("next-autosave-ts", "data"), State("autosave-enabled", "data")],
 )
 
 
@@ -1415,103 +1332,23 @@ def _extract_positions(elements_state: list) -> Dict[str, Dict[str, float]]:
     return positions
 
 
-def _apply_positions_to_elements(
-    elements_state: list, positions: Dict[str, Dict[str, float]]
-) -> list:
-    """Retourne une copie des éléments avec les positions remplacées (ou supprimées si positions vide)."""
-    out = copy.deepcopy(elements_state)
-    for el in out:
-        data = el.get("data", {})
-        if "source" in data or "target" in data:
-            continue
-        node_id = data.get("id")
-        if not node_id:
-            continue
-        if node_id in positions:
-            p = positions[node_id]
-            el["position"] = {"x": p["x"], "y": p["y"]}
-        else:
-            el.pop("position", None)
-    return out
-
-
 @app.callback(
-    [Output("save-status", "children"), Output("position-history", "data")],
-    Input("save-positions", "n_clicks"),
-    [State("planning-graph", "elements"), State("position-history", "data"), State("meta-store", "data")],
+    Output("save-status", "children"),
+    Input("dragfree-trigger", "data"),
+    State("planning-graph", "elements"),
     prevent_initial_call=True,
 )
-def save_positions(n_clicks, elements_state, history, meta_data):
-    """
-    Sauvegarde les positions (JSON) et les données (CSV) puis ajoute à l'historique (pour Annuler).
-    """
-    if not n_clicks:
-        return dash.no_update, dash.no_update
-
-    positions = _extract_positions(elements_state or [])
-    if not positions:
-        return "Aucune position à sauvegarder.", history or []
-
-    try:
-        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="update positions")
-        if meta_data:
-            save_csv_from_meta(meta_data)
-    except Exception as exc:
-        return f"Erreur lors de la sauvegarde : {exc}", history or []
-
-    new_history = (history or []) + [positions]
-    if len(new_history) > 10:
-        new_history = new_history[-10:]
-    return f"{len(positions)} positions sauvegardées.", new_history
-
-
-@app.callback(
-    [Output("planning-graph", "elements", allow_duplicate=True), Output("save-status", "children", allow_duplicate=True), Output("position-history", "data", allow_duplicate=True)],
-    Input("undo-positions", "n_clicks"),
-    [State("position-history", "data"), State("planning-graph", "elements")],
-    prevent_initial_call=True,
-)
-def undo_positions(n_clicks, history, elements_state):
-    """
-    Annule la dernière sauvegarde : restaure les positions précédentes et met à jour le graphe.
-    """
-    if not n_clicks:
-        return dash.no_update, dash.no_update, dash.no_update
-    if not history:
-        return dash.no_update, "Rien à annuler (aucune sauvegarde).", dash.no_update
-
-    new_history = history[:-1]
-    restore = new_history[-1] if new_history else {}
-
-    try:
-        _gh.write_text("node_positions.json", json.dumps(restore, indent=2), message="undo positions")
-    except Exception as exc:
-        return dash.no_update, f"Erreur annulation : {exc}", dash.no_update
-
-    new_elements = _apply_positions_to_elements(elements_state or [], restore)
-    return new_elements, "Positions restaurées (annulation).", new_history
-
-
-
-@app.callback(
-    Output("save-status", "children", allow_duplicate=True),
-    Input("auto-save-interval", "n_intervals"),
-    [State("planning-graph", "elements"), State("autosave-enabled", "data"), State("meta-store", "data")],
-    prevent_initial_call=True,
-)
-def auto_save_positions(n_intervals, elements_state, autosave_enabled, meta_data):
-    """Sauvegarde automatique des positions (JSON) et des données (CSV) toutes les 10 secondes."""
-    if n_intervals == 0 or not autosave_enabled:
+def save_positions_on_dragfree(trigger, elements_state):
+    """Sauvegarde les positions dans tasky-data à chaque déplacement de nœud."""
+    if not trigger:
         return dash.no_update
     positions = _extract_positions(elements_state or [])
     if not positions:
         return dash.no_update
     try:
-        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="autosave positions")
-        if meta_data:
-            save_csv_from_meta(meta_data)
-    except Exception:
-        pass
+        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="dragfree positions")
+    except Exception as exc:
+        return f"Erreur: {exc}"
     return dash.no_update
 
 
