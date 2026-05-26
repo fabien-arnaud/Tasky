@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "1.2"
+VERSION = "1.3"
 
 import base64
 import copy
@@ -18,8 +18,6 @@ import dash_cytoscape as cyto
 
 # Layouts supplémentaires (dont "dagre", "cose-bilkent", etc.)
 cyto.load_extra_layouts()
-
-
 
 
 
@@ -72,6 +70,7 @@ BG_COLOR = "#F5F3EE"
 COLOR_TODO = "#DDE6DA"
 COLOR_DONE = "#E7E3DC"
 COLOR_READY = "#A7B7C2"
+COLOR_READY_QUICK = "#5B91A8"
 COLOR_URGENT = "#A7B7C2"
 COLOR_GOAL = "#C5BAD8"
 
@@ -92,6 +91,7 @@ def load_tasks_from_csv() -> Tuple[
     Dict[str, str],
     Dict[str, List[str]],
     Dict[str, List[str]],
+    Dict[str, bool],
 ]:
     """Charge les tâches depuis le CSV et remplit les dictionnaires."""
     types_dict: Dict[str, str] = {}
@@ -100,6 +100,7 @@ def load_tasks_from_csv() -> Tuple[
     desc_dict: Dict[str, str] = {}
     pred_dict: Dict[str, List[str]] = {}
     follow_dict: Dict[str, List[str]] = {}
+    quick_dict: Dict[str, bool] = {}
 
     text = _gh.read_text("tasks.csv")
     reader = csv.DictReader(io.StringIO(text))
@@ -115,6 +116,7 @@ def load_tasks_from_csv() -> Tuple[
             # On accepte l'ancien séparateur ',' et le nouveau '-'
             cleaned = pred_str.replace(",", "-")
             pred_dict[i] = [p for p in cleaned.split("-") if p] if cleaned else []
+            quick_dict[i] = row.get("quick", "").strip() in ("1", "true", "True", "yes")
 
     # Suivants : pour chaque tâche, liste des tâches qui en dépendent
     for k in pred_dict:
@@ -124,7 +126,7 @@ def load_tasks_from_csv() -> Tuple[
             if pred_id in follow_dict:
                 follow_dict[pred_id].append(k)
 
-    return types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict
+    return types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict, quick_dict
 
 
 def compute_statuses(
@@ -198,6 +200,7 @@ def build_cytoscape_elements(
     follow_dict: Dict[str, List[str]],
     count_lockers: Dict[str, int],
     priority_paths_tasks: List[str],
+    quick_dict: Dict[str, bool] | None = None,
 ) -> List[dict]:
     """
     Construit la liste des éléments (nœuds + arêtes) pour dash_cytoscape.
@@ -261,14 +264,16 @@ def build_cytoscape_elements(
         if loc != "None":
             parent_id = f"group::{loc}"
 
+        is_quick = (quick_dict or {}).get(task_id, False)
         data = {
             "id": task_id,
-            "label": desc_dict[task_id],
+            "label": ("⚡ " if is_quick else "") + desc_dict[task_id],
             "status": status_dict[task_id],
             "type": types_dict[task_id],
             "location": loc,
             "count_lockers": count_lockers.get(task_id, 0),
             "priority_path": task_id in priority_paths_tasks,
+            "quick": is_quick,
         }
         if parent_id is not None:
             data["parent"] = parent_id
@@ -317,7 +322,7 @@ def build_model_from_csv() -> Tuple[List[dict], dict]:
       - la liste des éléments Cytoscape (nœuds + arêtes)
       - un dict 'meta' avec les structures de base (utile pour les futures callbacks).
     """
-    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict = load_tasks_from_csv()
+    types_dict, status_dict, location_dict, desc_dict, pred_dict, follow_dict, quick_dict = load_tasks_from_csv()
     raw_status_dict = dict(status_dict)  # sauvegarde avant mutation par compute_statuses
     count_lockers, priority_paths_tasks = compute_statuses(
         types_dict, status_dict, location_dict, pred_dict, follow_dict
@@ -331,6 +336,7 @@ def build_model_from_csv() -> Tuple[List[dict], dict]:
         follow_dict,
         count_lockers,
         priority_paths_tasks,
+        quick_dict,
     )
 
     # Si un fichier de positions existe, on l'applique aux nœuds
@@ -359,6 +365,7 @@ def build_model_from_csv() -> Tuple[List[dict], dict]:
         "follow_dict": follow_dict,
         "count_lockers": count_lockers,
         "priority_paths_tasks": priority_paths_tasks,
+        "quick_dict": quick_dict,
     }
     return elements, meta
 
@@ -441,8 +448,10 @@ def patch_elements_after_dependency_change(
         data["count_lockers"] = count_lockers.get(node_id, 0)
         data["priority_path"] = node_id in priority_paths_tasks
         desc_dict = new_meta.get("desc_dict", {})
+        quick_dict = new_meta.get("quick_dict", {})
         if node_id in desc_dict:
-            data["label"] = desc_dict[node_id]
+            data["label"] = ("⚡ " if quick_dict.get(node_id, False) else "") + desc_dict[node_id]
+        data["quick"] = quick_dict.get(node_id, False)
 
     return out
 
@@ -471,6 +480,7 @@ def _recompute_meta(base_meta: dict, pred_dict: Dict[str, List[str]]) -> dict:
         "follow_dict": follow_dict,
         "count_lockers": count_lockers,
         "priority_paths_tasks": priority_paths_tasks,
+        "quick_dict": base_meta.get("quick_dict", {}),
     }
 
 
@@ -480,6 +490,7 @@ def rebuild_elements_with_positions(new_meta: dict, old_elements: list) -> list:
         new_meta["types_dict"], new_meta["status_dict"], new_meta["location_dict"],
         new_meta["desc_dict"], new_meta["pred_dict"], new_meta["follow_dict"],
         new_meta["count_lockers"], new_meta["priority_paths_tasks"],
+        new_meta.get("quick_dict", {}),
     )
     old_pos = {el["data"]["id"]: el["position"] for el in old_elements if "position" in el}
     for el in new_els:
@@ -550,6 +561,7 @@ def save_csv_from_meta(meta: dict) -> None:
     location_dict = meta.get("location_dict", {})
     desc_dict = meta.get("desc_dict", {})
     pred_dict = meta.get("pred_dict", {})
+    quick_dict = meta.get("quick_dict", {})
     all_ids = sorted(types_dict.keys(), key=lambda x: int(x) if x.isdigit() else 0)
     rows = []
     for i in all_ids:
@@ -563,9 +575,10 @@ def save_csv_from_meta(meta: dict) -> None:
             "location": location_dict.get(i, ""),
             "description": raw_desc,
             "predecessors": "-".join(pred_dict.get(i, [])),
+            "quick": "1" if quick_dict.get(i, False) else "",
         })
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=["id", "type", "status", "location", "description", "predecessors"])
+    writer = csv.DictWriter(buf, fieldnames=["id", "type", "status", "location", "description", "predecessors", "quick"])
     writer.writeheader()
     writer.writerows(rows)
     _gh.write_text("tasks.csv", buf.getvalue(), message="update tasks")
@@ -654,6 +667,10 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
     {
         "selector": 'node[status *= "ToBuy"]',
         "style": {"background-color": COLOR_READY},
+    },
+    {
+        "selector": 'node[status *= "Ready"][?quick]',
+        "style": {"background-color": COLOR_READY_QUICK},
     },
     # Mise en avant du chemin de priorité
     {
@@ -1116,6 +1133,13 @@ clientside_callback(
                     }));
                 }
 
+                if (isOnNode && nodeIds.length > 0) {
+                    var isQuick = target.data('quick');
+                    rows.push(menuRow(isQuick ? "⚡ Retirer 'rapide'" : "⚡ Marquer comme rapide",
+                        function(){ dispatch({action:"toggle_quick", node_ids:nodeIds}); },
+                        {separator: rows.length > 0}));
+                }
+
                 if (nodeIds.length > 0 || edgeIds.length > 0) {
                     var parts = [];
                     if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
@@ -1552,6 +1576,20 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
                 if el.get("data", {}).get("id") == new_id:
                     el["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
                     break
+        return _finalize(new_elements, new_meta)
+
+    if action == "toggle_quick":
+        node_ids = action_data.get("node_ids", [])
+        if not node_ids:
+            return dash.no_update, dash.no_update, dash.no_update
+        quick_dict = dict(m.get("quick_dict", {}))
+        for nid in node_ids:
+            quick_dict[nid] = not quick_dict.get(nid, False)
+        base = dict(m)
+        base["quick_dict"] = quick_dict
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
         return _finalize(new_elements, new_meta)
 
     return dash.no_update, dash.no_update, dash.no_update
