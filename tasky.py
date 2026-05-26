@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "1.0.1"
+VERSION = "1.2"
 
 import base64
 import copy
@@ -705,10 +705,8 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "style": {"opacity": 0.3},
     },
     # Highlight chemin (taphold)
-    {"selector": ".hl-faded", "style": {"opacity": 0.12}},
-    {"selector": ".hl-focus", "style": {"border-width": 5, "border-color": "#FF8800"}},
-    {"selector": ".hl-pred",  "style": {"border-width": 3, "border-color": "#4488FF"}},
-    {"selector": ".hl-succ",  "style": {"border-width": 3, "border-color": "#44BB44"}},
+    {"selector": ".hl-path", "style": {"border-width": 5, "border-color": "#FF2222"}},
+    {"selector": ".hl-edge", "style": {"line-color": "#FF2222", "target-arrow-color": "#FF2222", "width": 7}},
 ]
 
 
@@ -878,30 +876,31 @@ clientside_callback(
             window._hlNode = null;
             window._hlDepth = 0;
             function applyHighlight(nodeId, depth) {
-                window.cy.elements().removeClass('hl-faded hl-focus hl-pred hl-succ');
+                window.cy.elements().removeClass('hl-path hl-edge');
                 var focus = window.cy.getElementById(nodeId);
-                var highlighted = window.cy.collection().merge(focus);
+                var hlNodes = window.cy.collection().merge(focus);
+                var hlEdges = window.cy.collection();
                 var frontier = focus;
                 for (var d = 0; d < depth; d++) {
                     var inc = frontier.incomers();
                     if (!inc.length) break;
-                    highlighted = highlighted.merge(inc);
-                    inc.nodes().addClass('hl-pred');
+                    hlNodes = hlNodes.merge(inc.nodes());
+                    hlEdges = hlEdges.merge(inc.edges());
                     frontier = inc.nodes();
                 }
                 frontier = focus;
                 for (var d = 0; d < depth; d++) {
                     var out = frontier.outgoers();
                     if (!out.length) break;
-                    highlighted = highlighted.merge(out);
-                    out.nodes().addClass('hl-succ');
+                    hlNodes = hlNodes.merge(out.nodes());
+                    hlEdges = hlEdges.merge(out.edges());
                     frontier = out.nodes();
                 }
-                window.cy.elements().not(highlighted).addClass('hl-faded');
-                focus.addClass('hl-focus');
+                hlNodes.addClass('hl-path');
+                hlEdges.addClass('hl-edge');
             }
             function exitHighlightMode() {
-                window.cy.elements().removeClass('hl-faded hl-focus hl-pred hl-succ');
+                window.cy.elements().removeClass('hl-path hl-edge');
                 window._hlNode = null;
                 window._hlDepth = 0;
             }
