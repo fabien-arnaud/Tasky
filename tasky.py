@@ -811,6 +811,14 @@ clientside_callback(
             var done = window.cy.nodes('[status *= "DONE"]');
             done.hide();
             done.connectedEdges().hide();
+            window.cy.nodes('[status = "TODO"]').forEach(function(node) {
+                var preds = node.incomers('node');
+                var blocked = preds.some(function(p) {
+                    var st = p.data('status') || '';
+                    return st.indexOf('Ready') < 0 && st.indexOf('ToBuy') < 0 && st.indexOf('DONE') < 0;
+                });
+                if (blocked) { node.hide(); node.connectedEdges().hide(); }
+            });
         } else {
             window.cy.elements().show();
         }
