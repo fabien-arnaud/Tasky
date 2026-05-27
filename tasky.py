@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "1.3"
+VERSION = "2.0"
 
 import base64
 import copy
@@ -741,7 +741,15 @@ def serve_layout():
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
             html.Span(VERSION, style={"font-size": "11px", "color": "#bbb", "position": "fixed", "bottom": "6px", "right": "10px", "zIndex": "1100", "pointerEvents": "none"}),
+            html.Button("▶ Exécution", id="view-toggle-btn", n_clicks=0, style={
+                "position": "fixed", "top": "6px", "right": "10px",
+                "zIndex": "1100", "fontSize": "13px",
+                "background": "white", "border": "1px solid #ccc",
+                "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
+            }),
             dcc.Store(id="meta-store", data=meta),
+            dcc.Store(id="view-mode", data="planning"),
+            dcc.Store(id="exec-view-applied", data=0),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
             dcc.Store(id="restore-viewport-done", data=0),
@@ -780,6 +788,39 @@ def serve_layout():
 app.layout = serve_layout
 
 
+clientside_callback(
+    """
+    function(n, cur) {
+        var next = cur === 'planning' ? 'execution' : 'planning';
+        var btn = document.getElementById('view-toggle-btn');
+        if (btn) btn.textContent = next === 'execution' ? '📋 Planification' : '▶ Exécution';
+        return next;
+    }
+    """,
+    Output("view-mode", "data"),
+    Input("view-toggle-btn", "n_clicks"),
+    State("view-mode", "data"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(viewMode) {
+        if (!window.cy) return 0;
+        if (viewMode === 'execution') {
+            var done = window.cy.nodes('[status *= "DONE"]');
+            done.hide();
+            done.connectedEdges().hide();
+        } else {
+            window.cy.elements().show();
+        }
+        return 0;
+    }
+    """,
+    Output("exec-view-applied", "data"),
+    Input("view-mode", "data"),
+    prevent_initial_call=True,
+)
 
 
 @app.callback(
