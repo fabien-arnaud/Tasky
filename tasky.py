@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.025"
+VERSION = "2.0.026"
 
 import base64
 import copy
@@ -998,13 +998,15 @@ def compute_exec_positions(view_mode, elements_state, meta):
         r0_idx = {nid: i for i, nid in enumerate(r0)}
         r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
 
-        # Passe 2 : trier r0 par barycentre sur r1 (quick toujours en premier)
+        # Passe 2 : trier r0 par barycentre sur r1 (quick en tête, puis TOPRIO, puis le reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
         quick     = [nid for nid in r0 if node_data_by_id[nid].get("quick")]
-        non_quick = [nid for nid in r0 if not node_data_by_id[nid].get("quick")]
+        toprio    = [nid for nid in r0 if not node_data_by_id[nid].get("quick") and status_by_id.get(nid) == "TOPRIO"]
+        non_quick = [nid for nid in r0 if not node_data_by_id[nid].get("quick") and status_by_id.get(nid) != "TOPRIO"]
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
+        toprio.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         non_quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
-        r0 = quick + non_quick
+        r0 = quick + toprio + non_quick
 
         # Passe 3 : retrier r1 avec le nouvel ordre r0
         r0_idx = {nid: i for i, nid in enumerate(r0)}
