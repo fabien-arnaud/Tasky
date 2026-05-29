@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.026"
+VERSION = "2.0.029"
 
 import base64
 import copy
@@ -634,6 +634,16 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "events": "no",
         },
     },
+    # Cadres projet invisibles en mode exécution (séparateurs dessinés sur canvas overlay)
+    {
+        "selector": 'node[is_group = "True"].exec-hide-group',
+        "style": {
+            "background-opacity": 0,
+            "border-width": 0,
+            "label": "",
+            "events": "no",
+        },
+    },
     # Formes par type (approximation de ton Graphviz)
     {
         "selector": 'node[type = "A"]',
@@ -885,10 +895,57 @@ clientside_callback(
                     edge.hide();
                 }
             });
+            window.cy.nodes('[is_group = "True"]').addClass('exec-hide-group');
             window.cy.nodes('[is_group != "True"]').ungrabify();
             window.cy.fit(window.cy.elements(':visible'), 50);
+            // Canvas overlay : lignes de séparation par projet
+            var container = window.cy.container();
+            var overlay = document.getElementById('cy-exec-overlay');
+            if (!overlay) {
+                overlay = document.createElement('canvas');
+                overlay.id = 'cy-exec-overlay';
+                overlay.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:10;';
+                container.style.position = 'relative';
+                container.appendChild(overlay);
+            }
+            function drawSeparators() {
+                var rect = container.getBoundingClientRect();
+                overlay.width = rect.width;
+                overlay.height = rect.height;
+                var ctx = overlay.getContext('2d');
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+                window.cy.nodes('[is_group = "True"]').forEach(function(node) {
+                    if (node.children(':visible').length === 0) return;
+                    var bb = node.renderedBoundingBox({ includeLabels: false });
+                    var y = bb.y1;
+                    ctx.beginPath();
+                    ctx.moveTo(bb.x1, y);
+                    ctx.lineTo(bb.x2, y);
+                    ctx.strokeStyle = '#aaaaaa';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                    var label = node.data('label') || '';
+                    ctx.fillStyle = '#888888';
+                    ctx.font = '12px sans-serif';
+                    ctx.fillText(label, bb.x1 + 4, y - 4);
+                });
+            }
+            window._execSepHandler = drawSeparators;
+            window.cy.on('render', window._execSepHandler);
+            drawSeparators();
         } else {
+            // Retirer le canvas overlay
+            if (window._execSepHandler) {
+                window.cy.off('render', window._execSepHandler);
+                window._execSepHandler = null;
+            }
+            var overlay = document.getElementById('cy-exec-overlay');
+            if (overlay) {
+                var ctx = overlay.getContext('2d');
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+            }
             window.cy.elements().show();
+            window.cy.nodes('[is_group = "True"]').removeClass('exec-hide-group');
             window.cy.nodes('[is_group != "True"]').grabify();
         }
         return 0;
