@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.029"
+VERSION = "2.0.033"
 
 import base64
 import copy
@@ -1646,6 +1646,26 @@ clientside_callback(
                         bgRows.push(menuRow("✚ Nouvelle tâche dans " + projName, function(pn) {
                             return function() { showCreateForm(pn, function() { showMenu(bgRows, x, y); }); };
                         }(projName)));
+                        bgRows.push(menuRow("✏ Renommer " + projName, function(pn) {
+                            return function() {
+                                renderMenu([menuRow("← retour", function(){ showMenu(bgRows, x, y); })]);
+                                var inp = document.createElement('input');
+                                inp.type = 'text'; inp.value = pn;
+                                inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                                ctxMenu.appendChild(inp);
+                                var btn = document.createElement('button');
+                                btn.textContent = 'Valider';
+                                btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                                btn.onclick = function() {
+                                    var v = inp.value.trim();
+                                    if (v && v !== pn) dispatch({action:"rename_project", old_name:pn, new_name:v});
+                                    else hideCtxMenu();
+                                };
+                                ctxMenu.appendChild(btn);
+                                inp.focus(); inp.select();
+                                inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                            };
+                        }(projName)));
                         bgRows.push(menuRow("☑ Sélectionner " + projName, function() {
                             hideCtxMenu();
                             setTimeout(function() {
@@ -1927,6 +1947,36 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
         return _finalize(new_elements, new_meta)
+
+    if action == "rename_project":
+        old_name = action_data.get("old_name", "").strip()
+        new_name = action_data.get("new_name", "").strip()
+        if not old_name or not new_name or old_name == new_name:
+            return dash.no_update, dash.no_update, dash.no_update
+        location_dict = dict(m.get("location_dict", {}))
+        for nid, loc in location_dict.items():
+            if loc == old_name:
+                location_dict[nid] = new_name
+        base = dict(m)
+        base["location_dict"] = location_dict
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        # Patcher en place : changer uniquement le label du groupe et la location des enfants.
+        # On ne touche PAS à l'ID du groupe ni au champ parent des enfants pour éviter
+        # que cytoscape supprime les enfants lors du diff de compound nodes.
+        old_group_id = f"group::{old_name}"
+        new_elements = copy.deepcopy(list(elements_state or []))
+        for el in new_elements:
+            data = el.get("data", {})
+            if data.get("id") == old_group_id:
+                data["label"] = new_name
+            elif data.get("parent") == old_group_id:
+                data["location"] = new_name
+        try:
+            save_csv_from_meta(new_meta)
+        except Exception:
+            pass
+        return new_elements, new_meta, None
 
     if action == "create_node":
         name = action_data.get("name", "").strip()
