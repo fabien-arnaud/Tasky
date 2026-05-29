@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.021"
+VERSION = "2.0.024"
 
 import base64
 import copy
@@ -842,6 +842,7 @@ clientside_callback(
     """
     function(n, cur) {
         var next = cur === 'planning' ? 'execution' : 'planning';
+        window._viewMode = next;
         var btn = document.getElementById('view-toggle-btn');
         if (btn) btn.textContent = next === 'execution' ? '📋 Planification' : '▶ Exécution';
         return next;
@@ -919,12 +920,11 @@ def compute_exec_positions(view_mode, elements_state, meta):
     status_by_id = {n["data"]["id"]: n["data"].get("status", "") for n in all_nodes}
     node_data_by_id = {n["data"]["id"]: n["data"] for n in all_nodes}
 
-    preds_by_target: dict = {}
-    succs_by_source: dict = {}
+    # Graphe complet (utilisé pour classer row0/row1)
+    preds_all: dict = {}
     for edge in edges:
         s, t = edge["data"]["source"], edge["data"]["target"]
-        preds_by_target.setdefault(t, []).append(s)
-        succs_by_source.setdefault(s, []).append(t)
+        preds_all.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
         return "Ready" in st or "ToBuy" in st or "DONE" in st or st in ("TOPRIO", "PRIO")
@@ -938,7 +938,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         if "Ready" in st or "ToBuy" in st or st in ("TOPRIO", "PRIO"):
             row0.add(nid)
         elif st == "TODO":
-            preds = preds_by_target.get(nid, [])
+            preds = preds_all.get(nid, [])
             loc = node_data_by_id[nid].get("location", "Sans projet")
             same_proj_unblocking = any(
                 is_unblocking(status_by_id.get(p, "")) and
@@ -947,6 +947,16 @@ def compute_exec_positions(view_mode, elements_state, meta):
             )
             if preds and same_proj_unblocking:
                 row1.add(nid)
+
+    # Graphe restreint aux nœuds visibles — utilisé pour tri barycentre et groupes
+    visible = row0 | row1
+    preds_by_target: dict = {}
+    succs_by_source: dict = {}
+    for edge in edges:
+        s, t = edge["data"]["source"], edge["data"]["target"]
+        if s in visible and t in visible:
+            preds_by_target.setdefault(t, []).append(s)
+            succs_by_source.setdefault(s, []).append(t)
 
     # Compter les tâches non-DONE par projet (sur tous les éléments, pas seulement visibles)
     remaining_by_project: dict = {}
@@ -1039,7 +1049,10 @@ def compute_exec_positions(view_mode, elements_state, meta):
             comps.setdefault(_find(nid), []).append(nid)
         groups = sorted(comps.values(), key=lambda g: r0_idx[g[0]])
 
-        # Pixel-based x placement (allows GROUP_GAP between groups)
+        # STEP = espace uniforme entre slots (intra-groupe ET inter-groupes)
+        # En intégrant GROUP_GAP dans le pas, tous les nœuds consécutifs sont
+        # espacés identiquement, qu'ils soient dans le même groupe ou non.
+        step = NODE_W + GROUP_GAP
         x = 0.0
         r0_px: dict = {}
         r1_px: dict = {}
@@ -1053,20 +1066,19 @@ def compute_exec_positions(view_mode, elements_state, meta):
             n0 = len(group)
             n1 = len(group_r1)
             n_slots = max(n0, n1) if n1 else n0
-            group_w = n_slots * NODE_W
+            group_total = n_slots * step  # largeur du groupe (pas d'extra après)
 
-            # Spread r0 and r1 evenly across group_w; single item centered
             for i, nid in enumerate(group):
-                r0_px[nid] = x + (i * (group_w - NODE_W) / (n0 - 1) if n0 > 1 else (group_w - NODE_W) / 2.0)
+                r0_px[nid] = x + (i * (group_total - step) / (n0 - 1) if n0 > 1 else (group_total - step) / 2.0)
             for i, t in enumerate(group_r1):
-                r1_px[t] = x + (i * (group_w - NODE_W) / (n1 - 1) if n1 > 1 else (group_w - NODE_W) / 2.0)
+                r1_px[t] = x + (i * (group_total - step) / (n1 - 1) if n1 > 1 else (group_total - step) / 2.0)
 
-            x += group_w + GROUP_GAP
+            x += group_total  # pas de +GROUP_GAP : déjà dans step
 
         for t in r1:
             if t not in r1_px:
                 r1_px[t] = x
-                x += NODE_W + GROUP_GAP
+                x += step
 
         if r0:
             for nid in r0:
@@ -1341,7 +1353,7 @@ clientside_callback(
             function menuRow(label, onclick, opts) {
                 var el = document.createElement('div');
                 el.textContent = label;
-                var css = 'padding:9px 18px;cursor:pointer;white-space:nowrap;';
+                var css = 'padding:5px 14px;cursor:pointer;white-space:nowrap;font-size:13px;';
                 if (opts && opts.separator) css += 'border-top:1px solid #e0e0e0;';
                 if (opts && opts.bold) css += 'font-weight:600;';
                 el.style.cssText = css;
@@ -1381,7 +1393,9 @@ clientside_callback(
                     var isBuy   = target.data('type') === 'A';
                     rows.push(menuRow((isQuick ? "✓ " : "   ") + "⚡ Rapide", function(){ dispatch({action:"toggle_quick", node_ids:nodeIds}); }));
                     rows.push(menuRow((isBuy   ? "✓ " : "   ") + "🛒 Achat",  function(){ dispatch({action:"toggle_buy",   node_ids:nodeIds}); }));
-                    var sep1 = document.createElement('div'); sep1.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep1);
+                    if (window._viewMode !== 'execution') {
+                        var sep1 = document.createElement('div'); sep1.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep1);
+                    }
                 }
 
                 var showNewNodeForm = function(actionObj) {
@@ -1402,64 +1416,36 @@ clientside_callback(
                     inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
                 };
 
-                if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
-                    var lnkId = target.id();
-                    var tProj = target.data('location') || '';
-                    var tPos  = target.position();
-                    rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
-                    rows.push(menuRow("✚ Créer suivant",  function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
-                    rows.push(menuRow("← Lien depuis",    function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'précédent'); }; }(lnkId)));
-                    rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
-                    var sep2 = document.createElement('div'); sep2.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep2);
-                }
-
-                if (isOnNode) {
-                    var otherSel = selNodes.not('#' + target.id());
-                    if (otherSel.length === 1) {
-                        var other = otherSel[0];
-                        var otherLbl = shortLabel(other.data('label') || other.id());
-                        rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
-                        rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
+                if (window._viewMode !== 'execution') {
+                    if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
+                        var lnkId = target.id();
+                        var tProj = target.data('location') || '';
+                        var tPos  = target.position();
+                        rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
+                        rows.push(menuRow("✚ Créer suivant",  function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                        rows.push(menuRow("← Lien depuis",    function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'précédent'); }; }(lnkId)));
+                        rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                        var sep2 = document.createElement('div'); sep2.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep2);
                     }
-                }
 
-                if (isOnNode && nodeIds.length === 1) {
-                    rows.push(menuRow("✏ Renommer", function() {
-                        var currentDesc = (target.data('label') || '').replace(/^[0-9]+: */, '');
-                        renderMenu([
-                            menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); }),
-                        ]);
-                        var inp = document.createElement('input');
-                        inp.type = 'text'; inp.value = currentDesc;
-                        inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
-                        ctxMenu.appendChild(inp);
-                        var btn = document.createElement('button');
-                        btn.textContent = 'Valider';
-                        btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
-                        btn.onclick = function() {
-                            var v = inp.value.trim();
-                            if (v) dispatch({action:"rename_node", node_id:nodeIds[0], new_name:v});
-                        };
-                        ctxMenu.appendChild(btn);
-                        inp.focus(); inp.select();
-                        inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
-                    }));
-                }
+                    if (isOnNode) {
+                        var otherSel = selNodes.not('#' + target.id());
+                        if (otherSel.length === 1) {
+                            var other = otherSel[0];
+                            var otherLbl = shortLabel(other.data('label') || other.id());
+                            rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
+                            rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
+                        }
+                    }
 
-                if (isOnNode && nodeIds.length > 0) {
-                    rows.push(menuRow("📁 Projet ▶", function() {
-                        var projects = window.cy.nodes('[is_group = "True"]')
-                            .map(function(n){ return n.data('label'); })
-                            .filter(function(l){ return !!l; })
-                            .sort();
-                        var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })];
-                        projects.forEach(function(proj) {
-                            subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
-                        });
-                        subRows.push(menuRow("✚ Nouveau projet…", function() {
-                            renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
+                    if (isOnNode && nodeIds.length === 1) {
+                        rows.push(menuRow("✏ Renommer", function() {
+                            var currentDesc = (target.data('label') || '').replace(/^[0-9]+: */, '');
+                            renderMenu([
+                                menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); }),
+                            ]);
                             var inp = document.createElement('input');
-                            inp.type = 'text'; inp.placeholder = 'Nom du projet';
+                            inp.type = 'text'; inp.value = currentDesc;
                             inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
                             ctxMenu.appendChild(inp);
                             var btn = document.createElement('button');
@@ -1467,25 +1453,54 @@ clientside_callback(
                             btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
                             btn.onclick = function() {
                                 var v = inp.value.trim();
-                                if (v) dispatch({action:"move_node", node_ids:nodeIds, project:v});
+                                if (v) dispatch({action:"rename_node", node_id:nodeIds[0], new_name:v});
                             };
                             ctxMenu.appendChild(btn);
-                            inp.focus();
+                            inp.focus(); inp.select();
                             inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
-                        }, {separator: true}));
-                        renderMenu(subRows);
-                    }));
-                }
+                        }));
+                    }
 
+                    if (isOnNode && nodeIds.length > 0) {
+                        rows.push(menuRow("📁 Projet ▶", function() {
+                            var projects = window.cy.nodes('[is_group = "True"]')
+                                .map(function(n){ return n.data('label'); })
+                                .filter(function(l){ return !!l; })
+                                .sort();
+                            var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })];
+                            projects.forEach(function(proj) {
+                                subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
+                            });
+                            subRows.push(menuRow("✚ Nouveau projet…", function() {
+                                renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
+                                var inp = document.createElement('input');
+                                inp.type = 'text'; inp.placeholder = 'Nom du projet';
+                                inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                                ctxMenu.appendChild(inp);
+                                var btn = document.createElement('button');
+                                btn.textContent = 'Valider';
+                                btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                                btn.onclick = function() {
+                                    var v = inp.value.trim();
+                                    if (v) dispatch({action:"move_node", node_ids:nodeIds, project:v});
+                                };
+                                ctxMenu.appendChild(btn);
+                                inp.focus();
+                                inp.onkeydown = function(e){ if (e.key==='Enter') btn.onclick(); };
+                            }, {separator: true}));
+                            renderMenu(subRows);
+                        }));
+                    }
 
-                if (nodeIds.length > 0 || edgeIds.length > 0) {
-                    var parts = [];
-                    if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
-                    if (edgeIds.length === 1) parts.push("1 lien");
-                    else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
-                    var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
-                    rows.push(menuRow(deleteLabel,
-                        function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); }));
+                    if (nodeIds.length > 0 || edgeIds.length > 0) {
+                        var parts = [];
+                        if (nodeIds.length > 1) parts.push(nodeIds.length + " nœuds");
+                        if (edgeIds.length === 1) parts.push("1 lien");
+                        else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
+                        var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
+                        rows.push(menuRow(deleteLabel,
+                            function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); }));
+                    }
                 }
 
 
