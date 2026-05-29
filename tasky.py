@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.024"
+VERSION = "2.0.025"
 
 import base64
 import copy
@@ -863,16 +863,16 @@ clientside_callback(
             var done = window.cy.nodes('[status *= "DONE"]');
             done.hide();
             done.connectedEdges().hide();
-            window.cy.nodes('[status = "TODO"]').forEach(function(node) {
+            function isUnblocking(p) {
+                var st = p.data('status') || '';
+                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                       st.indexOf('DONE') >= 0 || st === 'TOPRIO' || st === 'PRIO';
+            }
+            window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
                 var preds = node.incomers('node');
                 var loc = node.data('location');
-                function isUnblocking(p) {
-                    var st = p.data('status') || '';
-                    return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                           st.indexOf('DONE') >= 0 || st === 'TOPRIO' || st === 'PRIO';
-                }
                 var blocked = preds.length > 0 && preds.some(function(p) { return !isUnblocking(p); });
-                if (!blocked) {
+                if (!blocked && node.data('status') === 'TODO') {
                     var hasSameProjUnblocking = preds.some(function(p) {
                         return isUnblocking(p) && p.data('location') === loc;
                     });
@@ -935,8 +935,13 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or "ToBuy" in st or st in ("TOPRIO", "PRIO"):
+        if "Ready" in st or "ToBuy" in st or st == "TOPRIO":
             row0.add(nid)
+        elif st == "PRIO":
+            # PRIO visible seulement si tous les prédécesseurs sont DONE
+            preds = preds_all.get(nid, [])
+            if not preds or all("DONE" in status_by_id.get(p, "") for p in preds):
+                row0.add(nid)
         elif st == "TODO":
             preds = preds_all.get(nid, [])
             loc = node_data_by_id[nid].get("location", "Sans projet")
