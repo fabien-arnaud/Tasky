@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0"
+VERSION = "2.0.021"
 
 import base64
 import copy
@@ -109,7 +109,9 @@ def load_tasks_from_csv() -> Tuple[
             if not i or not i.isdigit():
                 continue
             types_dict[i] = row["type"].strip()
-            status_dict[i] = row["status"].strip().upper()
+            _s = row["status"].strip()
+            _canon = {"READY": "Ready", "TOBUY": "ToBuy", "READY-CRITIC": "Ready-Critic", "TOBUY-CRITIC": "ToBuy-Critic"}
+            status_dict[i] = _canon.get(_s.upper(), _s.upper())
             location_dict[i] = row["location"].strip()
             desc_dict[i] = i + ": " + row["description"].strip()
             pred_str = row["predecessors"].strip().replace(" ", "")
@@ -175,7 +177,7 @@ def compute_statuses(
             if status_dict[k] not in ["DONE", "TOPRIO"]:
                 status_dict[k] = {"F": "Ready", "A": "ToBuy", "O": "DONE"}[types_dict[k]]
         else:
-            if status_dict[k] in ["TOPRIO"]:
+            if status_dict[k] in ("TOPRIO", "Ready", "ToBuy", "Ready-Critic", "ToBuy-Critic"):
                 status_dict[k] = "TODO"
 
     # Marquage des tâches critiques
@@ -727,6 +729,52 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
 ]
 
 
+def build_execution_elements(elements_state: list) -> list:
+    nodes = [
+        el for el in elements_state
+        if "source" not in el.get("data", {}) and el.get("data", {}).get("is_group") != "True"
+    ]
+    edges = [el for el in elements_state if "source" in el.get("data", {})]
+
+    status_by_id = {n["data"]["id"]: n["data"].get("status", "") for n in nodes}
+
+    preds_by_target: dict = {}
+    for edge in edges:
+        t = edge["data"]["target"]
+        s = edge["data"]["source"]
+        preds_by_target.setdefault(t, []).append(s)
+
+    def is_unblocking(st: str) -> bool:
+        return ("Ready" in st or "ToBuy" in st or "DONE" in st
+                or st == "TOPRIO" or st == "PRIO")
+
+    visible_ids: set = set()
+    for nid, st in status_by_id.items():
+        if "DONE" in st:
+            continue
+        if "Ready" in st or "ToBuy" in st or st == "TOPRIO" or st == "PRIO":
+            visible_ids.add(nid)
+        elif st == "TODO":
+            preds = preds_by_target.get(nid, [])
+            if preds and any(is_unblocking(status_by_id.get(p, "")) for p in preds):
+                visible_ids.add(nid)
+
+    result = []
+    for el in elements_state:
+        data = el.get("data", {})
+        if data.get("is_group") == "True":
+            continue
+        if "source" in data:
+            if data["source"] in visible_ids and data["target"] in visible_ids:
+                result.append(el)
+        elif data.get("id") in visible_ids:
+            new_data = {k: v for k, v in data.items() if k != "parent"}
+            new_el = dict(el)
+            new_el["data"] = new_data
+            result.append(new_el)
+    return result
+
+
 app = dash.Dash(__name__, title=f"Tasky {VERSION}")
 server = app.server  # exposition pour gunicorn
 
@@ -750,6 +798,8 @@ def serve_layout():
             dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="view-mode", data="planning"),
             dcc.Store(id="exec-view-applied", data=0),
+            dcc.Store(id="exec-positions", data=None),
+            dcc.Store(id="planning-elements-cache", data=None),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
             dcc.Store(id="restore-viewport-done", data=0),
@@ -808,20 +858,37 @@ clientside_callback(
     function(viewMode) {
         if (!window.cy) return 0;
         if (viewMode === 'execution') {
+            window._planningViewport = { zoom: window.cy.zoom(), pan: window.cy.pan() };
             var done = window.cy.nodes('[status *= "DONE"]');
             done.hide();
             done.connectedEdges().hide();
             window.cy.nodes('[status = "TODO"]').forEach(function(node) {
                 var preds = node.incomers('node');
-                var blocked = preds.length > 0 && preds.some(function(p) {
+                var loc = node.data('location');
+                function isUnblocking(p) {
                     var st = p.data('status') || '';
-                    return st.indexOf('Ready') < 0 && st.indexOf('ToBuy') < 0 &&
-                           st.indexOf('DONE') < 0 && st !== 'TOPRIO' && st !== 'PRIO';
-                });
+                    return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                           st.indexOf('DONE') >= 0 || st === 'TOPRIO' || st === 'PRIO';
+                }
+                var blocked = preds.length > 0 && preds.some(function(p) { return !isUnblocking(p); });
+                if (!blocked) {
+                    var hasSameProjUnblocking = preds.some(function(p) {
+                        return isUnblocking(p) && p.data('location') === loc;
+                    });
+                    if (preds.length > 0 && !hasSameProjUnblocking) blocked = true;
+                }
                 if (blocked) { node.hide(); node.connectedEdges().hide(); }
             });
+            window.cy.edges(':visible').forEach(function(edge) {
+                if (edge.source().data('location') !== edge.target().data('location')) {
+                    edge.hide();
+                }
+            });
+            window.cy.nodes('[is_group != "True"]').ungrabify();
+            window.cy.fit(window.cy.elements(':visible'), 50);
         } else {
             window.cy.elements().show();
+            window.cy.nodes('[is_group != "True"]').grabify();
         }
         return 0;
     }
@@ -830,6 +897,231 @@ clientside_callback(
     Input("view-mode", "data"),
     prevent_initial_call=True,
 )
+
+
+@app.callback(
+    Output("exec-positions", "data"),
+    Input("view-mode", "data"),
+    State("planning-graph", "elements"),
+    State("meta-store", "data"),
+    prevent_initial_call=True,
+)
+def compute_exec_positions(view_mode, elements_state, meta):
+    if view_mode != "execution":
+        return dash.no_update
+
+    all_nodes = [
+        el for el in (elements_state or [])
+        if "source" not in el.get("data", {}) and el.get("data", {}).get("is_group") != "True"
+    ]
+    edges = [el for el in (elements_state or []) if "source" in el.get("data", {})]
+
+    status_by_id = {n["data"]["id"]: n["data"].get("status", "") for n in all_nodes}
+    node_data_by_id = {n["data"]["id"]: n["data"] for n in all_nodes}
+
+    preds_by_target: dict = {}
+    succs_by_source: dict = {}
+    for edge in edges:
+        s, t = edge["data"]["source"], edge["data"]["target"]
+        preds_by_target.setdefault(t, []).append(s)
+        succs_by_source.setdefault(s, []).append(t)
+
+    def is_unblocking(st: str) -> bool:
+        return "Ready" in st or "ToBuy" in st or "DONE" in st or st in ("TOPRIO", "PRIO")
+
+    # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
+    row0: set = set()
+    row1: set = set()
+    for nid, st in status_by_id.items():
+        if "DONE" in st:
+            continue
+        if "Ready" in st or "ToBuy" in st or st in ("TOPRIO", "PRIO"):
+            row0.add(nid)
+        elif st == "TODO":
+            preds = preds_by_target.get(nid, [])
+            loc = node_data_by_id[nid].get("location", "Sans projet")
+            same_proj_unblocking = any(
+                is_unblocking(status_by_id.get(p, "")) and
+                node_data_by_id.get(p, {}).get("location", "") == loc
+                for p in preds
+            )
+            if preds and same_proj_unblocking:
+                row1.add(nid)
+
+    # Compter les tâches non-DONE par projet (sur tous les éléments, pas seulement visibles)
+    remaining_by_project: dict = {}
+    for n in all_nodes:
+        loc = n["data"].get("location", "Sans projet")
+        if "DONE" not in n["data"].get("status", ""):
+            remaining_by_project[loc] = remaining_by_project.get(loc, 0) + 1
+
+    # Grouper par projet
+    by_project: dict = {}
+    for nid in row0:
+        loc = node_data_by_id[nid].get("location", "Sans projet")
+        by_project.setdefault(loc, {0: [], 1: []})
+        by_project[loc][0].append(nid)
+    for nid in row1:
+        loc = node_data_by_id[nid].get("location", "Sans projet")
+        by_project.setdefault(loc, {0: [], 1: []})
+        by_project[loc][1].append(nid)
+
+    # Minimisation des croisements par heuristique barycentre (2 passes)
+    def _barycenter(nid: str, neighbors: dict, index: dict) -> float:
+        nb = [n for n in neighbors.get(nid, []) if n in index]
+        return sum(index[n] for n in nb) / len(nb) if nb else float("inf")
+
+    for loc in by_project:
+        r0 = list(by_project[loc][0])
+        r1 = list(by_project[loc][1])
+        if not r0 or not r1:
+            by_project[loc][0] = r0
+            by_project[loc][1] = r1
+            continue
+
+        # Passe 1 : trier r1 par barycentre sur r0
+        r0_idx = {nid: i for i, nid in enumerate(r0)}
+        r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
+
+        # Passe 2 : trier r0 par barycentre sur r1 (quick toujours en premier)
+        r1_idx = {nid: i for i, nid in enumerate(r1)}
+        quick     = [nid for nid in r0 if node_data_by_id[nid].get("quick")]
+        non_quick = [nid for nid in r0 if not node_data_by_id[nid].get("quick")]
+        quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
+        non_quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
+        r0 = quick + non_quick
+
+        # Passe 3 : retrier r1 avec le nouvel ordre r0
+        r0_idx = {nid: i for i, nid in enumerate(r0)}
+        r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
+
+        by_project[loc][0] = r0
+        by_project[loc][1] = r1
+
+    # Trier les projets par nombre de tâches restantes (ascendant)
+    sorted_projects = sorted(by_project.keys(), key=lambda loc: remaining_by_project.get(loc, 0))
+
+    NODE_W   = 220
+    GROUP_GAP = 80   # extra pixels between groups within a project
+    ROW_H    = 140
+    PROJ_GAP = 60
+
+    positions: dict = {}
+    y = 0.0
+    for loc in sorted_projects:
+        r0 = by_project[loc][0]
+        r1 = by_project[loc][1]
+        r0_set_proj = set(r0)
+        r0_idx = {n: i for i, n in enumerate(r0)}
+        r1_idx = {n: i for i, n in enumerate(r1)}
+
+        # Union-find: group r0 nodes that share a r1 successor
+        # so they can be placed together above that shared successor
+        r0_rep: dict = {n: n for n in r0}
+
+        def _find(x: str) -> str:
+            while r0_rep[x] != x:
+                r0_rep[x] = r0_rep[r0_rep[x]]
+                x = r0_rep[x]
+            return x
+
+        for r1_nid in r1:
+            preds = [p for p in preds_by_target.get(r1_nid, []) if p in r0_set_proj]
+            if len(preds) > 1:
+                root = _find(preds[0])
+                for p in preds[1:]:
+                    pr = _find(p)
+                    if pr != root:
+                        r0_rep[pr] = root
+
+        comps: dict = {}
+        for nid in r0:
+            comps.setdefault(_find(nid), []).append(nid)
+        groups = sorted(comps.values(), key=lambda g: r0_idx[g[0]])
+
+        # Pixel-based x placement (allows GROUP_GAP between groups)
+        x = 0.0
+        r0_px: dict = {}
+        r1_px: dict = {}
+
+        for group in groups:
+            group_set = set(group)
+            group_r1 = sorted(
+                [t for t in r1 if any(p in group_set for p in preds_by_target.get(t, []))],
+                key=lambda t: r1_idx[t],
+            )
+            n0 = len(group)
+            n1 = len(group_r1)
+            n_slots = max(n0, n1) if n1 else n0
+            group_w = n_slots * NODE_W
+
+            # Spread r0 and r1 evenly across group_w; single item centered
+            for i, nid in enumerate(group):
+                r0_px[nid] = x + (i * (group_w - NODE_W) / (n0 - 1) if n0 > 1 else (group_w - NODE_W) / 2.0)
+            for i, t in enumerate(group_r1):
+                r1_px[t] = x + (i * (group_w - NODE_W) / (n1 - 1) if n1 > 1 else (group_w - NODE_W) / 2.0)
+
+            x += group_w + GROUP_GAP
+
+        for t in r1:
+            if t not in r1_px:
+                r1_px[t] = x
+                x += NODE_W + GROUP_GAP
+
+        if r0:
+            for nid in r0:
+                positions[nid] = {"x": r0_px[nid], "y": y}
+            y += ROW_H
+        if r1:
+            for t in r1:
+                positions[t] = {"x": r1_px[t], "y": y}
+            y += ROW_H
+        y += PROJ_GAP
+
+    return positions
+
+
+clientside_callback(
+    """
+    function(execPositions) {
+        if (!window.cy || !execPositions || Object.keys(execPositions).length === 0) return 0;
+        window.cy.batch(function() {
+            Object.keys(execPositions).forEach(function(id) {
+                var n = window.cy.getElementById(id);
+                if (n.length && !n.hidden()) n.position(execPositions[id]);
+            });
+        });
+        window.cy.fit(window.cy.elements(':visible'), 50);
+        return 0;
+    }
+    """,
+    Output("exec-view-applied", "data", allow_duplicate=True),
+    Input("exec-positions", "data"),
+    prevent_initial_call=True,
+)
+
+
+@app.callback(
+    Output("planning-graph", "elements", allow_duplicate=True),
+    Output("planning-graph", "layout"),
+    Input("view-mode", "data"),
+    State("meta-store", "data"),
+    prevent_initial_call=True,
+)
+def restore_planning_view(view_mode, meta):
+    if view_mode != "planning":
+        return dash.no_update, dash.no_update
+    try:
+        saved_positions = json.loads(_gh.read_text("node_positions.json"))
+    except Exception:
+        saved_positions = {}
+    elements = rebuild_elements_with_positions(meta or {}, [])
+    for el in elements:
+        data = el.get("data", {})
+        nid = data.get("id")
+        if nid and "source" not in data and nid in saved_positions:
+            el["position"] = saved_positions[nid]
+    return elements, {"name": "preset", "fit": True, "padding": 50}
 
 
 @app.callback(
@@ -1077,6 +1369,21 @@ clientside_callback(
             function buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode) {
                 var rows = [];
 
+                if (isOnNode && nodeIds.length > 0) {
+                    var curStatus = target.data('status') || '';
+                    var isTodo = curStatus === 'TODO' || curStatus.indexOf('Ready') >= 0 || curStatus.indexOf('ToBuy') >= 0;
+                    var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO';
+                    var isDone = curStatus.indexOf('DONE') >= 0;
+                    rows.push(menuRow((isTodo ? "✓ " : "   ") + "TODO",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }));
+                    rows.push(menuRow((isPrio ? "✓ " : "   ") + "PRIO ⭐", function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }));
+                    rows.push(menuRow((isDone ? "✓ " : "   ") + "DONE",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }));
+                    var isQuick = target.data('quick');
+                    var isBuy   = target.data('type') === 'A';
+                    rows.push(menuRow((isQuick ? "✓ " : "   ") + "⚡ Rapide", function(){ dispatch({action:"toggle_quick", node_ids:nodeIds}); }));
+                    rows.push(menuRow((isBuy   ? "✓ " : "   ") + "🛒 Achat",  function(){ dispatch({action:"toggle_buy",   node_ids:nodeIds}); }));
+                    var sep1 = document.createElement('div'); sep1.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep1);
+                }
+
                 var showNewNodeForm = function(actionObj) {
                     renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
                     var inp = document.createElement('input');
@@ -1097,15 +1404,13 @@ clientside_callback(
 
                 if (isOnNode && nodeIds.length === 1 && edgeIds.length === 0) {
                     var lnkId = target.id();
-                    rows.push(menuRow("➜ Suivant", function(id) {
-                        return function() { hideCtxMenu(); enterLinkMode(id, 'suivant'); };
-                    }(lnkId)));
-                    rows.push(menuRow("➜ Précédent", function(id) {
-                        return function() { hideCtxMenu(); enterLinkMode(id, 'précédent'); };
-                    }(lnkId)));
-                    var sepEl = document.createElement('div');
-                    sepEl.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;';
-                    rows.push(sepEl);
+                    var tProj = target.data('location') || '';
+                    var tPos  = target.position();
+                    rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
+                    rows.push(menuRow("✚ Créer suivant",  function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                    rows.push(menuRow("← Lien depuis",    function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'précédent'); }; }(lnkId)));
+                    rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                    var sep2 = document.createElement('div'); sep2.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep2);
                 }
 
                 if (isOnNode) {
@@ -1116,17 +1421,6 @@ clientside_callback(
                         rows.push(menuRow("↩ suit " + otherLbl, function(){ dispatch({action:"create_edge", source:other.id(), target:target.id()}); }));
                         rows.push(menuRow("↪ précède " + otherLbl, function(){ dispatch({action:"create_edge", source:target.id(), target:other.id()}); }));
                     }
-                }
-
-                if (isOnNode && nodeIds.length > 0) {
-                    rows.push(menuRow("● Statut ▶", function() {
-                        renderMenu([
-                            menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); }),
-                            menuRow("TODO",     function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }),
-                            menuRow("PRIO ⭐",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }),
-                            menuRow("DONE ✓",   function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }),
-                        ]);
-                    }));
                 }
 
                 if (isOnNode && nodeIds.length === 1) {
@@ -1153,7 +1447,7 @@ clientside_callback(
                 }
 
                 if (isOnNode && nodeIds.length > 0) {
-                    rows.push(menuRow("📁 Par projet ▶", function() {
+                    rows.push(menuRow("📁 Projet ▶", function() {
                         var projects = window.cy.nodes('[is_group = "True"]')
                             .map(function(n){ return n.data('label'); })
                             .filter(function(l){ return !!l; })
@@ -1183,12 +1477,6 @@ clientside_callback(
                     }));
                 }
 
-                if (isOnNode && nodeIds.length > 0) {
-                    var isQuick = target.data('quick');
-                    rows.push(menuRow(isQuick ? "⚡ Retirer 'rapide'" : "⚡ Marquer comme rapide",
-                        function(){ dispatch({action:"toggle_quick", node_ids:nodeIds}); },
-                        {separator: rows.length > 0}));
-                }
 
                 if (nodeIds.length > 0 || edgeIds.length > 0) {
                     var parts = [];
@@ -1197,40 +1485,10 @@ clientside_callback(
                     else if (edgeIds.length > 1) parts.push(edgeIds.length + " liens");
                     var deleteLabel = parts.length > 0 ? "🗑 Supprimer " + parts.join(" et ") : "🗑 Supprimer";
                     rows.push(menuRow(deleteLabel,
-                        function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); },
-                        {separator: rows.length > 0}));
+                        function(){ dispatch({action:"delete_selection", node_ids:nodeIds, edge_ids:edgeIds}); }));
                 }
 
-                if (isOnNode) {
-                    var targetProject = target.data('location') || '';
-                    var tpos = target.position();
-                    rows.push(menuRow("✚ Créer suivant", function(tp, px, py) {
-                        return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); };
-                    }(targetProject, tpos.x, tpos.y), {separator: true}));
-                    rows.push(menuRow("✚ Créer précédent", function(tp, px, py) {
-                        return function() { showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); };
-                    }(targetProject, tpos.x, tpos.y)));
-                }
 
-                if (nodeIds.length > 0) {
-                    var parents = selNodes.map(function(n){ return n.data('parent') || ''; });
-                    var uniqueParent = parents[0];
-                    var sameGroup = uniqueParent && parents.every(function(p){ return p === uniqueParent; });
-                    if (sameGroup) {
-                        var groupLbl = uniqueParent.replace('group::', '');
-                        var groupChildren = window.cy.nodes().filter(function(n) {
-                            return n.data('parent') === uniqueParent && n.data('is_group') !== 'True';
-                        });
-                        rows.push(menuRow("☑ Sélectionner " + groupLbl, function() {
-                            hideCtxMenu();
-                            setTimeout(function() {
-                                window.cy.$(':selected').unselect();
-                                clearEdgeSelection();
-                                groupChildren.select();
-                            }, 50);
-                        }, {separator: true}));
-                    }
-                }
 
                 return rows;
             }
@@ -1451,11 +1709,12 @@ def _extract_positions(elements_state: list) -> Dict[str, Dict[str, float]]:
     Output("save-status", "children"),
     Input("dragfree-trigger", "data"),
     State("planning-graph", "elements"),
+    State("view-mode", "data"),
     prevent_initial_call=True,
 )
-def save_positions_on_dragfree(trigger, elements_state):
+def save_positions_on_dragfree(trigger, elements_state, view_mode):
     """Sauvegarde les positions dans tasky-data à chaque déplacement de nœud."""
-    if not trigger:
+    if not trigger or view_mode == "execution":
         return dash.no_update
     positions = _extract_positions(elements_state or [])
     if not positions:
@@ -1637,6 +1896,20 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
             quick_dict[nid] = not quick_dict.get(nid, False)
         base = dict(m)
         base["quick_dict"] = quick_dict
+        pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
+        new_meta = _recompute_meta(base, pred_dict)
+        new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
+        return _finalize(new_elements, new_meta)
+
+    if action == "toggle_buy":
+        node_ids = action_data.get("node_ids", [])
+        if not node_ids:
+            return dash.no_update, dash.no_update, dash.no_update
+        types_dict = dict(m.get("types_dict", {}))
+        for nid in node_ids:
+            types_dict[nid] = "F" if types_dict.get(nid) == "A" else "A"
+        base = dict(m)
+        base["types_dict"] = types_dict
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
