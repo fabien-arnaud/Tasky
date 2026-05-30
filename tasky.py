@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.033"
+VERSION = "2.0.034"
 
 import base64
 import copy
@@ -682,6 +682,14 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
     },
     {
         "selector": 'node[status *= "Ready"][?quick]',
+        "style": {"background-color": COLOR_READY_QUICK},
+    },
+    {
+        "selector": 'node[status *= "ToBuy"][?quick]',
+        "style": {"background-color": COLOR_READY_QUICK},
+    },
+    {
+        "selector": 'node[status = "TOPRIO"][?quick]',
         "style": {"background-color": COLOR_READY_QUICK},
     },
     # Mise en avant du chemin de priorité
