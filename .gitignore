@@ -1,8 +1,7 @@
 .venv/
+venv/
 __pycache__/
 *.pyc
 .DS_Store
-*.backup.json
-*.backup.csv
-tasks.csv
-node_positions.json
+data/
+.env

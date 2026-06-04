@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.034"
+VERSION = "2.0.035"
 
-import base64
 import copy
 import os
 import csv
 import io
 import json
+import shutil
 from typing import Dict, List, Tuple
-
-import requests
 
 import dash
 from dash import html, dcc, Input, Output, State, clientside_callback
@@ -21,40 +19,98 @@ cyto.load_extra_layouts()
 
 
 
-class GitHubStorage:
-    """Lecture/écriture de fichiers via l'API GitHub Contents."""
+class LocalVersionedStorage:
+    """Lecture/écriture locale avec historique versionné (undo jusqu'à MAX_VERSIONS)."""
+
+    MAX_VERSIONS = 100
 
     def __init__(self):
-        self.token = os.environ.get("GITHUB_TOKEN", "")
-        self.repo = os.environ.get("GITHUB_DATA_REPO", "")  # ex: "fabien-arnaud/tasky-data"
-        self._headers = {
-            "Authorization": f"token {self.token}",
-            "Accept": "application/vnd.github.v3+json",
-        }
+        self.data_dir = os.environ.get(
+            "DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        )
+        self.history_dir = os.path.join(self.data_dir, "history")
+        os.makedirs(self.history_dir, exist_ok=True)
+        if self._get_head() == 0:
+            self._save_snapshot()
 
-    def _url(self, filename: str) -> str:
-        return f"https://api.github.com/repos/{self.repo}/contents/{filename}"
+    def _head_path(self):
+        return os.path.join(self.history_dir, ".head")
+
+    def _get_head(self):
+        try:
+            return int(open(self._head_path()).read().strip())
+        except Exception:
+            return 0
+
+    def _set_head(self, n):
+        with open(self._head_path(), "w") as f:
+            f.write(str(n))
+
+    def _snap_dir(self, n):
+        return os.path.join(self.history_dir, f"{n:06d}")
+
+    def _all_versions(self):
+        versions = []
+        for e in os.listdir(self.history_dir):
+            if not e.startswith("."):
+                try:
+                    versions.append(int(e))
+                except ValueError:
+                    pass
+        return sorted(versions)
 
     def read_text(self, filename: str) -> str:
-        r = requests.get(self._url(filename), headers=self._headers, timeout=10)
-        r.raise_for_status()
-        return base64.b64decode(r.json()["content"]).decode("utf-8")
+        with open(os.path.join(self.data_dir, filename), "r", encoding="utf-8") as f:
+            return f.read()
 
-    def write_text(self, filename: str, content: str, message: str = "update") -> None:
-        # Récupère le SHA actuel (requis par l'API pour les mises à jour)
-        r = requests.get(self._url(filename), headers=self._headers, timeout=10)
-        r.raise_for_status()
-        sha = r.json()["sha"]
-        payload = {
-            "message": message,
-            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
-            "sha": sha,
-        }
-        r = requests.put(self._url(filename), headers=self._headers, json=payload, timeout=15)
-        r.raise_for_status()
+    def write_text(self, filename: str, content: str, **kwargs) -> None:
+        with open(os.path.join(self.data_dir, filename), "w", encoding="utf-8") as f:
+            f.write(content)
+        self._save_snapshot()
+
+    def _save_snapshot(self):
+        head = self._get_head()
+        new_head = head + 1
+        for n in self._all_versions():
+            if n > head:
+                shutil.rmtree(self._snap_dir(n), ignore_errors=True)
+        snap = self._snap_dir(new_head)
+        os.makedirs(snap, exist_ok=True)
+        for fname in ("tasks.csv", "node_positions.json"):
+            src = os.path.join(self.data_dir, fname)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(snap, fname))
+        self._set_head(new_head)
+        self._prune()
+
+    def _prune(self):
+        versions = self._all_versions()
+        while len(versions) > self.MAX_VERSIONS:
+            shutil.rmtree(self._snap_dir(versions.pop(0)), ignore_errors=True)
+
+    def undo(self):
+        head = self._get_head()
+        versions = self._all_versions()
+        if head not in versions:
+            raise ValueError("Historique introuvable")
+        idx = versions.index(head)
+        if idx == 0:
+            raise ValueError("Déjà à la version la plus ancienne")
+        prev = versions[idx - 1]
+        snap = self._snap_dir(prev)
+        for fname in ("tasks.csv", "node_positions.json"):
+            src = os.path.join(snap, fname)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(self.data_dir, fname))
+        self._set_head(prev)
+
+    def can_undo(self) -> bool:
+        head = self._get_head()
+        versions = self._all_versions()
+        return head in versions and versions.index(head) > 0
 
 
-_gh = GitHubStorage()
+_storage = LocalVersionedStorage()
 
 # Style de graphe (mêmes valeurs conceptuelles que dans Planning.py)
 # - "groups" : groupement par pièce / location
@@ -102,7 +158,7 @@ def load_tasks_from_csv() -> Tuple[
     follow_dict: Dict[str, List[str]] = {}
     quick_dict: Dict[str, bool] = {}
 
-    text = _gh.read_text("tasks.csv")
+    text = _storage.read_text("tasks.csv")
     reader = csv.DictReader(io.StringIO(text))
     for row in reader:
             i = row["id"].strip()
@@ -343,7 +399,7 @@ def build_model_from_csv() -> Tuple[List[dict], dict]:
 
     # Si un fichier de positions existe, on l'applique aux nœuds
     try:
-        saved_positions = json.loads(_gh.read_text("node_positions.json"))
+        saved_positions = json.loads(_storage.read_text("node_positions.json"))
     except Exception:
         saved_positions = {}
     if isinstance(saved_positions, dict):
@@ -583,7 +639,7 @@ def save_csv_from_meta(meta: dict) -> None:
     writer = csv.DictWriter(buf, fieldnames=["id", "type", "status", "location", "description", "predecessors", "quick"])
     writer.writeheader()
     writer.writerows(rows)
-    _gh.write_text("tasks.csv", buf.getvalue(), message="update tasks")
+    _storage.write_text("tasks.csv", buf.getvalue())
 
 
 
@@ -813,6 +869,14 @@ def serve_layout():
                 "background": "white", "border": "1px solid #ccc",
                 "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
             }),
+            html.Button("↩", id="undo-btn", n_clicks=0, title="Annuler",
+                disabled=not _storage.can_undo(),
+                style={
+                    "position": "fixed", "top": "6px", "right": "145px",
+                    "zIndex": "1100", "fontSize": "14px",
+                    "background": "white", "border": "1px solid #ccc",
+                    "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
+                }),
             dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="view-mode", data="planning"),
             dcc.Store(id="exec-view-applied", data=0),
@@ -1196,7 +1260,7 @@ def restore_planning_view(view_mode, meta):
     if view_mode != "planning":
         return dash.no_update, dash.no_update
     try:
-        saved_positions = json.loads(_gh.read_text("node_positions.json"))
+        saved_positions = json.loads(_storage.read_text("node_positions.json"))
     except Exception:
         saved_positions = {}
     elements = rebuild_elements_with_positions(meta or {}, [])
@@ -1827,7 +1891,7 @@ def save_positions_on_dragfree(trigger, elements_state, view_mode):
     if not positions:
         return dash.no_update
     try:
-        _gh.write_text("node_positions.json", json.dumps(positions, indent=2), message="dragfree positions")
+        _storage.write_text("node_positions.json", json.dumps(positions, indent=2))
     except Exception as exc:
         return f"Erreur: {exc}"
     return dash.no_update
@@ -2053,6 +2117,28 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         return _finalize(new_elements, new_meta)
 
     return dash.no_update, dash.no_update, dash.no_update
+
+
+@app.callback(
+    [
+        Output("planning-graph", "elements", allow_duplicate=True),
+        Output("meta-store", "data", allow_duplicate=True),
+        Output("restore-viewport-trigger", "data", allow_duplicate=True),
+        Output("undo-btn", "disabled"),
+    ],
+    Input("undo-btn", "n_clicks"),
+    State("viewport-debug", "data"),
+    prevent_initial_call=True,
+)
+def undo_action(n_clicks, viewport_debug):
+    if not n_clicks:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+    try:
+        _storage.undo()
+    except ValueError:
+        return dash.no_update, dash.no_update, dash.no_update, True
+    elements, meta = build_model_from_csv()
+    return elements, meta, (viewport_debug or {}).get("extent"), not _storage.can_undo()
 
 
 if __name__ == "__main__":
