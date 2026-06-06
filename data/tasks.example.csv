@@ -1,0 +1,21 @@
+id,type,status,location,description,predecessors,quick
+1,F,DONE,Cuisine,Démonter l'ancienne cuisine,,
+2,A,DONE,Cuisine,Commander les meubles de cuisine,,
+3,F,DONE,Cuisine,Refaire l'électricité,1,
+4,F,TODO,Cuisine,Poser les meubles bas,2-3,
+5,A,TODO,Cuisine,Acheter crédence et plan de travail,2,
+6,F,TODO,Cuisine,Poser le plan de travail,4-5,
+7,F,PRIO,Cuisine,Installer la crédence et la robinetterie,6,
+8,A,DONE,Jardin,Acheter terreau et outils,,1
+9,F,DONE,Jardin,Désherber et préparer la zone,,
+10,F,TODO,Jardin,Construire les bacs de culture,9,
+11,A,TODO,Jardin,Acheter les plants de légumes,,1
+12,F,TODO,Jardin,Planter et semer les légumes,8-10-11,
+13,F,TODO,Jardin,Installer le système d'arrosage,10,
+14,F,PRIO,Jardin,Poser les dalles de la terrasse,9,
+15,A,DONE,Bureau,Commander le bureau réglable en hauteur,,
+16,F,TODO,Bureau,Peindre les murs,,
+17,F,TODO,Bureau,Installer le bureau et le fauteuil,15-16,
+18,A,TODO,Bureau,Acheter lampe et écran externe,,1
+19,F,TODO,Bureau,Câbler et organiser les fils,17-18,
+20,F,PRIO,Bureau,Aménager les étagères et le rangement,16,
