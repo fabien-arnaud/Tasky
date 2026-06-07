@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.035"
+VERSION = "2.0.036"
 
 import copy
 import os
@@ -30,8 +30,16 @@ class LocalVersionedStorage:
         )
         self.history_dir = os.path.join(self.data_dir, "history")
         os.makedirs(self.history_dir, exist_ok=True)
+        self._seed_from_example()
         if self._get_head() == 0:
             self._save_snapshot()
+
+    def _seed_from_example(self):
+        tasks_path = os.path.join(self.data_dir, "tasks.csv")
+        if not os.path.exists(tasks_path):
+            example = os.path.join(self.data_dir, "tasks.example.csv")
+            if os.path.exists(example):
+                shutil.copy2(example, tasks_path)
 
     def _head_path(self):
         return os.path.join(self.history_dir, ".head")
