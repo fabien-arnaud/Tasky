@@ -3,6 +3,9 @@ venv/
 __pycache__/
 *.pyc
 .DS_Store
+data/history/
 data/*.csv
+data/*.json
 !data/tasks.example.csv
+!data/node_positions.example.json
 .env
