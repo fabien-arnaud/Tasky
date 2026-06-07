@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.036"
+VERSION = "2.0.037"
 
 import copy
 import os
@@ -40,6 +40,10 @@ class LocalVersionedStorage:
             example = os.path.join(self.data_dir, "tasks.example.csv")
             if os.path.exists(example):
                 shutil.copy2(example, tasks_path)
+        positions_path = os.path.join(self.data_dir, "node_positions.json")
+        if not os.path.exists(positions_path):
+            with open(positions_path, "w", encoding="utf-8") as f:
+                f.write("{}")
 
     def _head_path(self):
         return os.path.join(self.history_dir, ".head")
