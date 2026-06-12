@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.038"
+VERSION = "2.0.039"
 
 import copy
 import os
@@ -1097,6 +1097,17 @@ def compute_exec_positions(view_mode, elements_state, meta):
             )
             if preds and same_proj_unblocking:
                 row1.add(nid)
+
+    # Passe supplémentaire : nœuds PRIO dont tous les prédécesseurs visibles sont en row0
+    # (les prédécesseurs TODO non-row0 seront cachés par le JS → on les ignore)
+    for nid, st in status_by_id.items():
+        if nid in row0 or nid in row1 or "DONE" in st or st != "PRIO":
+            continue
+        preds = preds_all.get(nid, [])
+        non_done_preds = [p for p in preds if "DONE" not in status_by_id.get(p, "")]
+        visible_preds = [p for p in non_done_preds if p in row0 or p in row1]
+        if visible_preds and all(p in row0 or p in row1 for p in visible_preds):
+            row1.add(nid)
 
     # Graphe restreint aux nœuds visibles — utilisé pour tri barycentre et groupes
     visible = row0 | row1
