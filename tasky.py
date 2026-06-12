@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.039"
+VERSION = "2.0.039-dark-mode.001"
 
 import copy
 import os
@@ -152,6 +152,12 @@ COLOR_DONE_HL = "#B2B0AC"
 COLOR_READY_HL = "#8FA1AB"
 COLOR_URGENT_HL = "#8FA1AB"
 COLOR_GOAL_HL = "#9B8FBF"
+
+# Mode sombre : surcharges pour groupes et fond
+BG_COLOR_DARK    = "#1e1e1e"
+GROUP_BG_DARK    = "#252526"
+GROUP_BORDER_DARK = "#555555"
+GROUP_LABEL_DARK = "#888888"
 
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
 
@@ -819,6 +825,33 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
 ]
 
 
+CYTOSCAPE_STYLESHEET_DARK_OVERRIDES: List[dict] = [
+    {
+        "selector": 'node[is_group = "True"]',
+        "style": {
+            "background-color": GROUP_BG_DARK,
+            "border-color": GROUP_BORDER_DARK,
+            "color": GROUP_LABEL_DARK,
+        },
+    },
+    {
+        "selector": "edge",
+        "style": {
+            "line-color": "#666666",
+            "target-arrow-color": "#666666",
+        },
+    },
+    {
+        "selector": ".hl-edge",
+        "style": {"line-color": "#FF4444", "target-arrow-color": "#FF4444"},
+    },
+    {
+        "selector": 'node[status = "DONE"]',
+        "style": {"color": "#bbbbbb", "opacity": 0.7, "background-color": "#3a3a3a"},
+    },
+]
+
+
 def build_execution_elements(elements_state: list) -> list:
     nodes = [
         el for el in elements_state
@@ -868,6 +901,38 @@ def build_execution_elements(elements_state: list) -> list:
 app = dash.Dash(__name__, title=f"Tasky {VERSION}")
 server = app.server  # exposition pour gunicorn
 
+app.index_string = '''<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            body.dark-mode { background: ''' + BG_COLOR_DARK + ''' !important; }
+            body.dark-mode .tasky-btn {
+                background: #2d2d30 !important;
+                color: #cccccc !important;
+                border-color: #555555 !important;
+            }
+            body.dark-mode #context-menu {
+                background: #252526 !important;
+                border-color: #555555 !important;
+                color: #cccccc !important;
+            }
+            body.dark-mode #context-menu div:hover { background: #2d2d30 !important; }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>'''
+
 
 def serve_layout():
     elements, meta = build_model_from_csv()
@@ -879,7 +944,7 @@ def serve_layout():
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
             html.Span(VERSION, style={"font-size": "11px", "color": "#bbb", "position": "fixed", "bottom": "6px", "right": "10px", "zIndex": "1100", "pointerEvents": "none"}),
-            html.Button("▶ Exécution", id="view-toggle-btn", n_clicks=0, style={
+            html.Button("▶ Exécution", id="view-toggle-btn", n_clicks=0, className="tasky-btn", style={
                 "position": "fixed", "top": "6px", "right": "10px",
                 "zIndex": "1100", "fontSize": "13px",
                 "background": "white", "border": "1px solid #ccc",
@@ -887,12 +952,20 @@ def serve_layout():
             }),
             html.Button("↩", id="undo-btn", n_clicks=0, title="Annuler",
                 disabled=not _storage.can_undo(),
+                className="tasky-btn",
                 style={
                     "position": "fixed", "top": "6px", "right": "145px",
                     "zIndex": "1100", "fontSize": "14px",
                     "background": "white", "border": "1px solid #ccc",
                     "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
                 }),
+            html.Button("🌙 Sombre", id="theme-toggle-btn", n_clicks=0, className="tasky-btn", style={
+                "position": "fixed", "top": "6px", "right": "195px",
+                "zIndex": "1100", "fontSize": "13px",
+                "background": "white", "border": "1px solid #ccc",
+                "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
+            }),
+            dcc.Store(id="theme", data="light"),
             dcc.Store(id="meta-store", data=meta),
             dcc.Store(id="view-mode", data="planning"),
             dcc.Store(id="exec-view-applied", data=0),
@@ -934,6 +1007,42 @@ def serve_layout():
 
 
 app.layout = serve_layout
+
+
+# Callback theme toggle
+clientside_callback(
+    """
+    function(n, cur) {
+        var dark = (cur !== 'dark');
+        var next = dark ? 'dark' : 'light';
+        window._theme = next;
+        document.body.classList.toggle('dark-mode', dark);
+        var container = document.getElementById('planning-graph');
+        if (container) {
+            container.style.background = dark ? '""" + BG_COLOR_DARK + """' : '""" + BG_COLOR + """';
+            if (container.parentElement) container.parentElement.style.background = dark ? '""" + BG_COLOR_DARK + """' : '""" + BG_COLOR + """';
+        }
+        var btn = document.getElementById('theme-toggle-btn');
+        if (btn) btn.textContent = dark ? '☀️ Clair' : '🌙 Sombre';
+        return next;
+    }
+    """,
+    Output("theme", "data"),
+    Input("theme-toggle-btn", "n_clicks"),
+    State("theme", "data"),
+    prevent_initial_call=True,
+)
+
+
+@app.callback(
+    Output("planning-graph", "stylesheet"),
+    Input("theme", "data"),
+    prevent_initial_call=True,
+)
+def update_theme_stylesheet(theme):
+    if theme == "dark":
+        return CYTOSCAPE_STYLESHEET + CYTOSCAPE_STYLESHEET_DARK_OVERRIDES
+    return CYTOSCAPE_STYLESHEET
 
 
 clientside_callback(
@@ -1006,14 +1115,15 @@ clientside_callback(
                     if (node.children(':visible').length === 0) return;
                     var bb = node.renderedBoundingBox({ includeLabels: false });
                     var y = bb.y1;
+                    var isDark = window._theme === 'dark';
                     ctx.beginPath();
                     ctx.moveTo(bb.x1, y);
                     ctx.lineTo(bb.x2, y);
-                    ctx.strokeStyle = '#aaaaaa';
+                    ctx.strokeStyle = isDark ? '#555555' : '#aaaaaa';
                     ctx.lineWidth = 1;
                     ctx.stroke();
                     var label = node.data('label') || '';
-                    ctx.fillStyle = '#888888';
+                    ctx.fillStyle = isDark ? '#888888' : '#888888';
                     ctx.font = '12px sans-serif';
                     ctx.fillText(label, bb.x1 + 4, y - 4);
                 });
