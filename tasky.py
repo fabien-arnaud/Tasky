@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.040-auto-place.001"
+VERSION = "2.0.040"
 
 import copy
 import os
