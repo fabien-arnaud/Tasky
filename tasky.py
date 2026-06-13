@@ -1586,8 +1586,8 @@ clientside_callback(
                         var tPos  = target.position();
                         rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
                         rows.push(menuRow("✚ Créer suivant",  function(tp, px, py, nodeId){ return function(){
-                            var ROW_H = 80, COL_W = 80, tries = 0, found = false;
-                            var snappedPX = Math.round(px / COL_W) * COL_W;
+                            var ROW_H = 80, COL_W = 160, GRID_X = 80, tries = 0, found = false;
+                            var snappedPX = Math.round(px / GRID_X) * GRID_X;
                             var targetY = Math.floor((py + ROW_H * 2) / ROW_H) * ROW_H;
                             var near = window.cy.nodes('[is_group != "True"]').filter(function(n){ return Math.abs(n.position('y') - targetY) < ROW_H / 2; });
                             var candidateX = snappedPX;
