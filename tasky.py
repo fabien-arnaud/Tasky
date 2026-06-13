@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.039"
+VERSION = "2.0.040-auto-place.001"
 
 import copy
 import os
@@ -1585,7 +1585,19 @@ clientside_callback(
                         var tProj = target.data('location') || '';
                         var tPos  = target.position();
                         rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
-                        rows.push(menuRow("✚ Créer suivant",  function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px+160, y:py}, successor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                        rows.push(menuRow("✚ Créer suivant",  function(tp, px, py, nodeId){ return function(){
+                            var ROW_H = 80, COL_W = 80, tries = 0, found = false;
+                            var snappedPX = Math.round(px / COL_W) * COL_W;
+                            var targetY = Math.floor((py + ROW_H * 2) / ROW_H) * ROW_H;
+                            var near = window.cy.nodes('[is_group != "True"]').filter(function(n){ return Math.abs(n.position('y') - targetY) < ROW_H / 2; });
+                            var candidateX = snappedPX;
+                            while (!found && tries < 20) {
+                                var blocked = false;
+                                near.forEach(function(n){ if (Math.abs(n.position('x') - candidateX) < COL_W / 2) blocked = true; });
+                                if (!blocked) { found = true; } else { candidateX += COL_W; tries++; }
+                            }
+                            showNewNodeForm({action:"create_node", project:tp, position:{x:candidateX, y:targetY}, successor_of:nodeId});
+                        }; }(tProj, tPos.x, tPos.y, target.id())));
                         rows.push(menuRow("← Lien depuis",    function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'précédent'); }; }(lnkId)));
                         rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
                         var sep2 = document.createElement('div'); sep2.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep2);
@@ -2113,6 +2125,12 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
                 if el.get("data", {}).get("id") == new_id:
                     el["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
                     break
+            try:
+                saved_positions = json.loads(_storage.read_text("node_positions.json"))
+            except Exception:
+                saved_positions = {}
+            saved_positions[new_id] = {"x": float(pos["x"]), "y": float(pos["y"])}
+            _storage.write_text("node_positions.json", json.dumps(saved_positions, indent=2))
         return _finalize(new_elements, new_meta)
 
     if action == "toggle_quick":
