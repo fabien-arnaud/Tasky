@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.040"
+VERSION = "2.0.041-touch-select.004"
 
 import copy
 import os
@@ -1429,53 +1429,48 @@ clientside_callback(
                 window.cy.container().style.cursor = '';
             }
 
-            // --- Highlight chemin (taphold) ---
+            // --- Highlight chemin (dbltap) ---
             window._hlNode = null;
             window._hlDepth = 0;
             function applyHighlight(nodeId, depth) {
-                window.cy.elements().removeClass('hl-path hl-edge');
+                window.cy.$(':selected').unselect();
+                clearEdgeSelection();
                 var focus = window.cy.getElementById(nodeId);
-                var hlNodes = window.cy.collection().merge(focus);
-                var hlEdges = window.cy.collection();
+                if (!focus.length) return;
+                focus.select();
                 var frontier = focus;
                 for (var d = 0; d < depth; d++) {
                     var inc = frontier.incomers();
                     if (!inc.length) break;
-                    hlNodes = hlNodes.merge(inc.nodes());
-                    hlEdges = hlEdges.merge(inc.edges());
+                    inc.nodes().select();
+                    inc.edges().select();
                     frontier = inc.nodes();
                 }
                 frontier = focus;
                 for (var d = 0; d < depth; d++) {
                     var out = frontier.outgoers();
                     if (!out.length) break;
-                    hlNodes = hlNodes.merge(out.nodes());
-                    hlEdges = hlEdges.merge(out.edges());
+                    out.nodes().select();
+                    out.edges().select();
                     frontier = out.nodes();
                 }
-                hlNodes.addClass('hl-path');
-                hlEdges.addClass('hl-edge');
             }
             function exitHighlightMode() {
-                window.cy.elements().removeClass('hl-path hl-edge');
                 window._hlNode = null;
                 window._hlDepth = 0;
             }
-            window.cy.on('taphold', 'node', function(evt) {
-                if (evt.target.data('is_group') === 'True') return;
-                var nodeId = evt.target.id();
-                if (window._hlNode === nodeId) {
-                    window._hlDepth += 1;
-                } else {
-                    window._hlNode = nodeId;
-                    window._hlDepth = 1;
-                }
-                applyHighlight(nodeId, window._hlDepth);
+            var _menuFromTaphold = false;
+            window.cy.on('taphold', function(evt) {
+                _menuFromTaphold = true;
+                setTimeout(function() { _menuFromTaphold = false; }, 200);
+                if (evt.originalEvent) evt.originalEvent.preventDefault();
+                handleContextMenu(evt);
             });
 
             window._preClickSelected = false;
             window._tappedNodeId = null;
             window._tapToggleTimer = null;
+            window._isDblTap = false;
             window.cy.on('tapstart', 'node', function(evt) {
                 if (evt.target.data('is_group') === 'True') return;
                 window.cy.selectionType('additive');
@@ -1495,8 +1490,8 @@ clientside_callback(
                     exitLinkMode();
                     return;
                 }
-                if (window._preClickSelected && evt.target.id() === window._tappedNodeId) {
-                    // Delayed toggle : annulé si dbltap arrive avant
+                if (!window._isDblTap && window._preClickSelected && evt.target.id() === window._tappedNodeId) {
+                    // Delayed toggle : annulé si dbltap arrive avant ou après
                     if (window._tapToggleTimer) clearTimeout(window._tapToggleTimer);
                     var _el = evt.target;
                     window._tapToggleTimer = setTimeout(function() {
@@ -1856,6 +1851,7 @@ clientside_callback(
             }
 
             window.cy.on('cxttap', function(evt) {
+                if (_menuFromTaphold) return;
                 evt.originalEvent.preventDefault();
                 handleContextMenu(evt);
             });
@@ -1878,8 +1874,20 @@ clientside_callback(
                     } else {
                         window.cy.animate({ fit: { eles: window.cy.elements(), padding: 50 } }, { duration: 400 });
                     }
+                } else if (target.data('is_group') === 'True') {
+                    window.cy.animate({ fit: { eles: target, padding: 40 } }, { duration: 400 });
+                } else if (target.isNode()) {
+                    window._isDblTap = true;
+                    if (window._tapToggleTimer) { clearTimeout(window._tapToggleTimer); window._tapToggleTimer = null; }
+                    var nodeId = target.id();
+                    if (window._hlNode === nodeId) { window._hlDepth += 1; }
+                    else { window._hlNode = nodeId; window._hlDepth = 1; }
+                    var _snap = { id: nodeId, depth: window._hlDepth };
+                    setTimeout(function() {
+                        window._isDblTap = false;
+                        applyHighlight(_snap.id, _snap.depth);
+                    }, 0);
                 } else {
-                    // Nœud ou arête : annule le toggle tap en attente, puis menu contextuel
                     if (window._tapToggleTimer) { clearTimeout(window._tapToggleTimer); window._tapToggleTimer = null; }
                     handleContextMenu(evt);
                 }
