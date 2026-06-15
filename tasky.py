@@ -897,6 +897,7 @@ def serve_layout():
             dcc.Store(id="view-mode", data="planning"),
             dcc.Store(id="exec-view-applied", data=0),
             dcc.Store(id="exec-positions", data=None),
+            dcc.Store(id="planning-positions", data=None),
             dcc.Store(id="planning-elements-cache", data=None),
             dcc.Store(id="viewport-debug", data=None),
             dcc.Store(id="restore-viewport-trigger", data=None),
@@ -958,6 +959,10 @@ clientside_callback(
         if (!window.cy) return 0;
         if (viewMode === 'execution') {
             window._planningViewport = { zoom: window.cy.zoom(), pan: window.cy.pan() };
+            window._planningNodePositions = {};
+            window.cy.nodes('[is_group != "True"]').forEach(function(n) {
+                window._planningNodePositions[n.id()] = { x: n.position('x'), y: n.position('y') };
+            });
             var done = window.cy.nodes('[status *= "DONE"]');
             done.hide();
             done.connectedEdges().hide();
@@ -1275,28 +1280,46 @@ clientside_callback(
     prevent_initial_call=True,
 )
 
-
-@app.callback(
-    Output("planning-graph", "elements", allow_duplicate=True),
-    Output("planning-graph", "layout"),
-    Input("view-mode", "data"),
-    State("meta-store", "data"),
+clientside_callback(
+    """
+    function(positions) {
+        if (!window.cy) return 0;
+        var pos = window._planningNodePositions || positions || {};
+        if (Object.keys(pos).length === 0) return 0;
+        window.cy.batch(function() {
+            Object.keys(pos).forEach(function(id) {
+                var n = window.cy.getElementById(id);
+                if (n.length) n.position(pos[id]);
+            });
+        });
+        if (window._planningViewport) {
+            window.cy.zoom(window._planningViewport.zoom);
+            window.cy.pan(window._planningViewport.pan);
+        } else {
+            window.cy.fit(window.cy.elements(), 50);
+        }
+        return 0;
+    }
+    """,
+    Output("exec-view-applied", "data", allow_duplicate=True),
+    Input("planning-positions", "data"),
     prevent_initial_call=True,
 )
-def restore_planning_view(view_mode, meta):
+
+
+@app.callback(
+    Output("planning-positions", "data"),
+    Input("view-mode", "data"),
+    prevent_initial_call=True,
+)
+def restore_planning_view(view_mode):
     if view_mode != "planning":
-        return dash.no_update, dash.no_update
+        return dash.no_update
     try:
         saved_positions = json.loads(_storage.read_text("node_positions.json"))
     except Exception:
         saved_positions = {}
-    elements = rebuild_elements_with_positions(meta or {}, [])
-    for el in elements:
-        data = el.get("data", {})
-        nid = data.get("id")
-        if nid and "source" not in data and nid in saved_positions:
-            el["position"] = saved_positions[nid]
-    return elements, {"name": "preset", "fit": True, "padding": 50}
+    return saved_positions
 
 
 @app.callback(
