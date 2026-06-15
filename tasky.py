@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.040"
+VERSION = "2.0.041-code-quality.001"
 
 import copy
 import os
@@ -153,6 +153,24 @@ COLOR_READY_HL = "#8FA1AB"
 COLOR_URGENT_HL = "#8FA1AB"
 COLOR_GOAL_HL = "#9B8FBF"
 
+# Grille de placement (vue planification)
+GRID_ROW_H = 80    # espacement vertical entre lignes
+GRID_COL_W = 160   # espacement horizontal entre colonnes de frères
+
+# Statuts bruts (valeurs stockées dans le CSV)
+class Status:
+    TODO   = "TODO"
+    DONE   = "DONE"
+    PRIO   = "PRIO"
+    TOPRIO = "TOPRIO"
+    READY  = "Ready"
+    TOBUY  = "ToBuy"
+
+# Types de tâches
+class TaskType:
+    FAIRE   = "F"
+    ACHETER = "A"
+
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
 
 
@@ -218,20 +236,20 @@ def compute_statuses(
 
     # For all Priority task, all previous not DONE become TOPRIO (except the priority ones)
     priority_paths_tasks: List[str] = []
-    for t in [k for k, val in status_dict.items() if val == "PRIO"]:
+    for t in [k for k, val in status_dict.items() if val == Status.PRIO]:
         priority_paths_tasks.append(t)
 
         def set_prio(task_id: str) -> None:
-            if status_dict[task_id] != "DONE":
+            if status_dict[task_id] != Status.DONE:
                 priority_paths_tasks.append(task_id)
-                if status_dict[task_id] != "PRIO":
-                    status_dict[task_id] = "TOPRIO"
+                if status_dict[task_id] != Status.PRIO:
+                    status_dict[task_id] = Status.TOPRIO
                 for p in pred_dict[task_id]:
                     set_prio(p)
 
-        if len([p for p in pred_dict[t] if status_dict[p] != "DONE"]) == 0:
+        if len([p for p in pred_dict[t] if status_dict[p] != Status.DONE]) == 0:
             priority_paths_tasks.append(t)
-            status_dict[t] = "TOPRIO"
+            status_dict[t] = Status.TOPRIO
         else:
             for p in pred_dict[t]:
                 set_prio(p)
@@ -242,24 +260,24 @@ def compute_statuses(
 
         # Combien de prédécesseurs ne sont pas DONE ?
         for t in pred_dict[k]:
-            if status_dict[t] not in ("DONE",):
+            if status_dict[t] != Status.DONE:
                 count_lockers[k] += 1
 
         if count_lockers[k] == 0:
-            if status_dict[k] not in ["DONE", "TOPRIO"]:
-                status_dict[k] = {"F": "Ready", "A": "ToBuy", "O": "DONE"}[types_dict[k]]
+            if status_dict[k] not in [Status.DONE, Status.TOPRIO]:
+                status_dict[k] = {TaskType.FAIRE: Status.READY, TaskType.ACHETER: Status.TOBUY, "O": Status.DONE}[types_dict[k]]
         else:
-            if status_dict[k] in ("TOPRIO", "Ready", "ToBuy", "Ready-Critic", "ToBuy-Critic"):
-                status_dict[k] = "TODO"
+            if status_dict[k] in (Status.TOPRIO, Status.READY, Status.TOBUY, "Ready-Critic", "ToBuy-Critic"):
+                status_dict[k] = Status.TODO
 
     # Marquage des tâches critiques
     for k in follow_dict.keys():
         if len(follow_dict[k]) > 0:
-            if status_dict[k] in ["Ready", "ToBuy"]:
+            if status_dict[k] in [Status.READY, Status.TOBUY]:
                 if min([count_lockers[a] for a in follow_dict[k]]) == 1:
                     status_dict[k] = status_dict[k] + "-" + "Critic"
         else:
-            if status_dict[k] in ["Ready", "ToBuy"]:
+            if status_dict[k] in [Status.READY, Status.TOBUY]:
                 status_dict[k] = status_dict[k] + "-" + "Critic"
 
     return count_lockers, priority_paths_tasks
@@ -293,7 +311,7 @@ def build_cytoscape_elements(
 
     # Pour les tâches de type "A" reliées à plusieurs pièces, on les met dans "None"
     for k, t_type in types_dict.items():
-        if t_type == "A":
+        if t_type == TaskType.ACHETER:
             followers_locations = {
                 grouped_location_dict[o] for o in follow_dict.get(k, []) if o in grouped_location_dict
             }
@@ -367,12 +385,12 @@ def build_cytoscape_elements(
                     continue
                 # Si les pièces sont différentes et que le bloquant est DONE,
                 # on ne montre plus le lien
-                if loc_k != loc_t and status_dict.get(k) == "DONE":
+                if loc_k != loc_t and status_dict.get(k) == Status.DONE:
                     continue
 
             # Pour les liens entre pièces différentes en vue "groups",
             # on n'affiche le lien que si le bloquant n'est pas fini
-            if loc_k != loc_t and status_dict.get(k) == "DONE":
+            if loc_k != loc_t and status_dict.get(k) == Status.DONE:
                 continue
 
             elements.append(
@@ -381,7 +399,7 @@ def build_cytoscape_elements(
                         "id": f"{k}->{t}",
                         "source": k,
                         "target": t,
-                        "source_done": status_dict.get(k) == "DONE",
+                        "source_done": status_dict.get(k) == Status.DONE,
                     }
                 }
             )
@@ -456,7 +474,7 @@ def _edge_visible_in_style(
     if GRAPH_STYLE in ["mess", "no goals"]:
         grouped = {k: "None" for k in grouped}
     for k, t_type in types_dict.items():
-        if t_type == "A":
+        if t_type == TaskType.ACHETER:
             follow_dict = meta.get("follow_dict", {})
             followers_locations = {
                 grouped.get(o) for o in follow_dict.get(k, []) if o in grouped
@@ -468,9 +486,9 @@ def _edge_visible_in_style(
     if GRAPH_STYLE in ["no goals"]:
         if types_dict.get(source) == "O" or types_dict.get(target) == "O":
             return False
-        if loc_k != loc_t and status_dict.get(source) == "DONE":
+        if loc_k != loc_t and status_dict.get(source) == Status.DONE:
             return False
-    if loc_k != loc_t and status_dict.get(source) == "DONE":
+    if loc_k != loc_t and status_dict.get(source) == Status.DONE:
         return False
     return True
 
@@ -505,7 +523,7 @@ def patch_elements_after_dependency_change(
                         "id": f"{source}->{target}",
                         "source": source,
                         "target": target,
-                        "source_done": new_meta.get("status_dict", {}).get(source) == "DONE",
+                        "source_done": new_meta.get("status_dict", {}).get(source) == Status.DONE,
                     }
                 }
             )
@@ -517,8 +535,8 @@ def patch_elements_after_dependency_change(
         node_id = data.get("id")
         if not node_id or data.get("is_group") == "True":
             continue
-        data["status"] = status_dict.get(node_id, data.get("status", "TODO"))
-        data["type"] = types_dict.get(node_id, data.get("type", "F"))
+        data["status"] = status_dict.get(node_id, data.get("status", Status.TODO))
+        data["type"] = types_dict.get(node_id, data.get("type", TaskType.FAIRE))
         data["count_lockers"] = count_lockers.get(node_id, 0)
         data["priority_path"] = node_id in priority_paths_tasks
         desc_dict = new_meta.get("desc_dict", {})
@@ -1586,8 +1604,8 @@ clientside_callback(
                         var tPos  = target.position();
                         rows.push(menuRow("→ Lien vers",      function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'suivant'); };   }(lnkId)));
                         rows.push(menuRow("✚ Créer suivant",  function(tp, px, py, nodeId){ return function(){
-                            var ROW_H = 80, COL_W = 160, GRID_X = 80, tries = 0, found = false;
-                            var snappedPX = Math.round(px / GRID_X) * GRID_X;
+                            var ROW_H = """ + str(GRID_ROW_H) + """, COL_W = """ + str(GRID_COL_W) + """, tries = 0, found = false;
+                            var snappedPX = Math.round(px / ROW_H) * ROW_H;
                             var targetY = Math.floor((py + ROW_H * 2) / ROW_H) * ROW_H;
                             var near = window.cy.nodes('[is_group != "True"]').filter(function(n){ return Math.abs(n.position('y') - targetY) < ROW_H / 2; });
                             var candidateX = snappedPX;
@@ -1599,7 +1617,7 @@ clientside_callback(
                             showNewNodeForm({action:"create_node", project:tp, position:{x:candidateX, y:targetY}, successor_of:nodeId});
                         }; }(tProj, tPos.x, tPos.y, target.id())));
                         rows.push(menuRow("← Lien depuis",    function(id){ return function(){ hideCtxMenu(); enterLinkMode(id, 'précédent'); }; }(lnkId)));
-                        rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-160, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
+                        rows.push(menuRow("✚ Créer précédent",function(tp, px, py){ return function(){ showNewNodeForm({action:"create_node", project:tp, position:{x:px-""" + str(GRID_COL_W) + """, y:py}, predecessor_of:target.id()}); }; }(tProj, tPos.x, tPos.y)));
                         var sep2 = document.createElement('div'); sep2.style.cssText = 'border-top:1px solid #e0e0e0;margin:4px 0;'; rows.push(sep2);
                     }
 
@@ -2101,8 +2119,8 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         location_dict = dict(m.get("location_dict", {}))
         desc_dict = dict(m.get("desc_dict", {}))
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
-        types_dict[new_id] = "F"
-        raw_status[new_id] = "TODO"
+        types_dict[new_id] = TaskType.FAIRE
+        raw_status[new_id] = Status.TODO
         location_dict[new_id] = project
         desc_dict[new_id] = f"{new_id}: {name}"
         pred_dict[new_id] = []
@@ -2153,7 +2171,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
             return dash.no_update, dash.no_update, dash.no_update
         types_dict = dict(m.get("types_dict", {}))
         for nid in node_ids:
-            types_dict[nid] = "F" if types_dict.get(nid) == "A" else "A"
+            types_dict[nid] = TaskType.FAIRE if types_dict.get(nid) == TaskType.ACHETER else TaskType.ACHETER
         base = dict(m)
         base["types_dict"] = types_dict
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
