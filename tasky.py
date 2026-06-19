@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.046"
+VERSION = "2.0.047"
 
 import copy
 import os
@@ -978,14 +978,20 @@ clientside_callback(
                        st.indexOf('DONE') >= 0 || st === 'PRIO';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
-                var preds = node.incomers('node');
+                var preds = node.incomers('[is_group != "True"]');
                 var loc = node.data('location');
-                var blocked = preds.length > 0 && preds.some(function(p) { return !isUnblocking(p); });
-                if (!blocked && node.data('status') === 'TODO') {
+                var blocked;
+                if (node.data('status') === 'PRIO') {
+                    // PRIO visible seulement si tous les prédécesseurs sont DONE
+                    blocked = preds.length > 0 && preds.some(function(p) {
+                        return (p.data('status') || '').indexOf('DONE') < 0;
+                    });
+                } else {
+                    // TODO visible si au moins un prédécesseur same-project est unblocking
                     var hasSameProjUnblocking = preds.some(function(p) {
                         return isUnblocking(p) && p.data('location') === loc;
                     });
-                    if (preds.length > 0 && !hasSameProjUnblocking) blocked = true;
+                    blocked = preds.length === 0 || !hasSameProjUnblocking;
                 }
                 if (blocked) { node.hide(); node.connectedEdges().hide(); }
             });
