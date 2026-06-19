@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.041-touch-select.004"
+VERSION = "2.0.041"
 
 import copy
 import os
