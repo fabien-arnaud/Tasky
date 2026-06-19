@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.000"
+VERSION = "2.1.001"
 
 import copy
 import os
@@ -226,7 +226,7 @@ def compute_statuses(
         def set_prio(task_id: str) -> None:
             if status_dict[task_id] != "DONE":
                 priority_paths_tasks.append(task_id)
-                if status_dict[task_id] != "PRIO":
+                if status_dict[task_id] not in ("PRIO", "WIP"):
                     status_dict[task_id] = "TOPRIO"
                 for p in pred_dict[task_id]:
                     set_prio(p)
