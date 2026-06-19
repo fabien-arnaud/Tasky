@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.048"
+VERSION = "2.0.049-exec-multilevel.001"
 
 import copy
 import os
@@ -224,7 +224,7 @@ def compute_statuses(
         def set_prio(task_id: str) -> None:
             if status_dict[task_id] != "DONE":
                 priority_paths_tasks.append(task_id)
-                if status_dict[task_id] != "PRIO":
+                if status_dict[task_id] not in ("PRIO", "WIP"):
                     status_dict[task_id] = "TOPRIO"
                 for p in pred_dict[task_id]:
                     set_prio(p)
@@ -246,7 +246,7 @@ def compute_statuses(
                 count_lockers[k] += 1
 
         if count_lockers[k] == 0:
-            if status_dict[k] not in ["DONE", "TOPRIO"]:
+            if status_dict[k] not in ["DONE", "TOPRIO", "WIP"]:
                 status_dict[k] = {"F": "Ready", "A": "ToBuy", "O": "DONE"}[types_dict[k]]
         else:
             if status_dict[k] in ("TOPRIO", "Ready", "ToBuy", "Ready-Critic", "ToBuy-Critic"):
@@ -997,7 +997,12 @@ clientside_callback(
                 if (blocked) { node.hide(); node.connectedEdges().hide(); }
             });
             window.cy.edges(':visible').forEach(function(edge) {
-                if (edge.source().data('location') !== edge.target().data('location')) {
+                var src = edge.source();
+                var st = src.data('status') || '';
+                // Cacher les arêtes cross-project et les arêtes sortantes de row1
+                var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                             st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+                if (!isRow0 || src.data('location') !== edge.target().data('location')) {
                     edge.hide();
                 }
             });
@@ -1098,7 +1103,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or "ToBuy" in st or st == "TOPRIO":
+        if "Ready" in st or "ToBuy" in st or st == "WIP" or st == "TOPRIO":
             row0.add(nid)
         elif st == "PRIO":
             # PRIO visible seulement si tous les prédécesseurs sont DONE
