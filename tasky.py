@@ -1222,8 +1222,8 @@ def compute_exec_positions(view_mode, elements_state, meta):
         r0_idx = {n: i for i, n in enumerate(r0)}
         r1_idx = {n: i for i, n in enumerate(r1)}
 
-        # Union-find: group r0 nodes that share a r1 successor
-        # so they can be placed together above that shared successor
+        # Union-find : regrouper les nœuds row0 qui partagent un successeur row1
+        # pour les placer ensemble au-dessus de ce successeur commun
         r0_rep: dict = {n: n for n in r0}
 
         def _find(x: str) -> str:
