@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.045"
+VERSION = "2.0.046"
 
 import copy
 import os
@@ -974,7 +974,8 @@ clientside_callback(
             done.connectedEdges().hide();
             function isUnblocking(p) {
                 var st = p.data('status') || '';
-                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 || st.indexOf('DONE') >= 0;
+                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                       st.indexOf('DONE') >= 0 || st === 'PRIO';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
                 var preds = node.incomers('node');
@@ -1082,7 +1083,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         preds_all.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "ToBuy" in st or "DONE" in st
+        return "Ready" in st or "ToBuy" in st or "DONE" in st or st == "PRIO"
 
     # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
     row0: set = set()
