@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.044"
+VERSION = "2.0.045"
 
 import copy
 import os
@@ -974,8 +974,7 @@ clientside_callback(
             done.connectedEdges().hide();
             function isUnblocking(p) {
                 var st = p.data('status') || '';
-                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                       st.indexOf('DONE') >= 0 || st === 'TOPRIO' || st === 'PRIO';
+                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 || st.indexOf('DONE') >= 0;
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
                 var preds = node.incomers('node');
