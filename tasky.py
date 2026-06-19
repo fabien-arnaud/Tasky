@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.049-exec-multilevel.002"
+VERSION = "2.1.003"
 
 import copy
 import os
@@ -145,6 +145,8 @@ COLOR_READY = "#A7B7C2"
 COLOR_READY_QUICK = "#5B91A8"
 COLOR_URGENT = "#A7B7C2"
 COLOR_GOAL = "#C5BAD8"
+COLOR_WIP  = "#E8A838"   # orange — tâche en cours
+COLOR_WIP_HL = "#C07A10" # orange foncé
 
 # Couleurs de highlight (surlignage au clic : chaque nœud selon son statut réel)
 COLOR_TODO_HL = "#7E8570"
@@ -734,6 +736,11 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
     },
     # Couleurs par statut principal
     {"selector": 'node[status = "TODO"]', "style": {"background-color": COLOR_TODO}},
+    {"selector": 'node[status = "WIP"]', "style": {
+        "background-color": COLOR_WIP,
+        "border-width": 3,
+        "border-color": COLOR_WIP_HL,
+    }},
     {
         "selector": 'node[status = "PRIO"]',
         # Même couleur que les objectifs (rouge doux)
@@ -975,7 +982,7 @@ clientside_callback(
             function isUnblocking(p) {
                 var st = p.data('status') || '';
                 return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                       st.indexOf('DONE') >= 0 || st === 'PRIO';
+                       st.indexOf('DONE') >= 0 || st === 'PRIO' || st === 'WIP';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
                 var preds = node.incomers('[is_group != "True"]');
@@ -1095,7 +1102,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         preds_all.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "ToBuy" in st or "DONE" in st or st == "PRIO"
+        return "Ready" in st or "ToBuy" in st or "DONE" in st or st == "PRIO" or st == "WIP"
 
     # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
     row0: set = set()
@@ -1177,15 +1184,17 @@ def compute_exec_positions(view_mode, elements_state, meta):
         r0_idx = {nid: i for i, nid in enumerate(r0)}
         r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
 
-        # Passe 2 : trier r0 par barycentre sur r1 (PRIO/TOPRIO en tête, puis quick, puis le reste)
+        # Passe 2 : trier r0 par barycentre sur r1 (WIP en tête, puis PRIO/TOPRIO, puis quick, puis le reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
+        wip_r0    = [nid for nid in r0 if status_by_id.get(nid) == "WIP"]
         prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO", "PRIO")]
-        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO") and node_data_by_id[nid].get("quick")]
-        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO") and not node_data_by_id[nid].get("quick")]
+        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
+        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
+        wip_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         prio_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         non_quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
-        r0 = prio_r0 + quick + non_quick
+        r0 = wip_r0 + prio_r0 + quick + non_quick
 
         # Passe 3 : retrier r1 avec le nouvel ordre r0
         r0_idx = {nid: i for i, nid in enumerate(r0)}
@@ -1195,20 +1204,25 @@ def compute_exec_positions(view_mode, elements_state, meta):
         by_project[loc][1] = r1
 
     # Classifier les projets pour le tri
+    wip_projects: set = set()
     prio_projects: set = set()
     quick_projects: set = set()
     for loc, rows in by_project.items():
         for nid in rows[0] + rows[1]:
+            if status_by_id.get(nid) == "WIP":
+                wip_projects.add(loc)
             if status_by_id.get(nid) in ("TOPRIO", "PRIO"):
                 prio_projects.add(loc)
             if node_data_by_id.get(nid, {}).get("quick"):
                 quick_projects.add(loc)
 
-    # Trier : PRIO/TOPRIO d'abord, puis quick, puis le plus de tâches restantes
+    # Trier : WIP d'abord, puis PRIO/TOPRIO, puis quick, puis le plus de tâches restantes
     sorted_projects = sorted(
         by_project.keys(),
         key=lambda loc: (
-            0 if loc in prio_projects else 1 if loc in quick_projects else 2,
+            0 if loc in wip_projects else
+            1 if loc in prio_projects else
+            2 if loc in quick_projects else 3,
             -remaining_by_project.get(loc, 0)
         )
     )
@@ -1599,9 +1613,11 @@ clientside_callback(
                 if (isOnNode && nodeIds.length > 0) {
                     var curStatus = target.data('status') || '';
                     var isTodo = curStatus === 'TODO' || curStatus.indexOf('Ready') >= 0 || curStatus.indexOf('ToBuy') >= 0;
+                    var isWip  = curStatus === 'WIP';
                     var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO';
                     var isDone = curStatus.indexOf('DONE') >= 0;
                     rows.push(menuRow((isTodo ? "✓ " : "   ") + "TODO",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }));
+                    rows.push(menuRow((isWip  ? "✓ " : "   ") + "WIP 🔧",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"WIP"}); }));
                     rows.push(menuRow((isPrio ? "✓ " : "   ") + "PRIO ⭐", function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"PRIO"}); }));
                     rows.push(menuRow((isDone ? "✓ " : "   ") + "DONE",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"DONE"}); }));
                     var isQuick = target.data('quick');
