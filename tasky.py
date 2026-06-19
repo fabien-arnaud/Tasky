@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.043"
+VERSION = "2.0.044"
 
 import copy
 import os
@@ -826,7 +826,8 @@ def build_execution_elements(elements_state: list) -> list:
     ]
     edges = [el for el in elements_state if "source" in el.get("data", {})]
 
-    status_by_id = {n["data"]["id"]: n["data"].get("status", "") for n in nodes}
+    status_by_id   = {n["data"]["id"]: n["data"].get("status", "")   for n in nodes}
+    location_by_id = {n["data"]["id"]: n["data"].get("location", "") for n in nodes}
 
     preds_by_target: dict = {}
     for edge in edges:
@@ -845,7 +846,11 @@ def build_execution_elements(elements_state: list) -> list:
             visible_ids.add(nid)
         elif st == "TODO":
             preds = preds_by_target.get(nid, [])
-            if preds and any(is_unblocking(status_by_id.get(p, "")) for p in preds):
+            loc = location_by_id.get(nid, "")
+            if preds and any(
+                is_unblocking(status_by_id.get(p, "")) and location_by_id.get(p, "") == loc
+                for p in preds
+            ):
                 visible_ids.add(nid)
 
     result = []
@@ -854,7 +859,9 @@ def build_execution_elements(elements_state: list) -> list:
         if data.get("is_group") == "True":
             continue
         if "source" in data:
-            if data["source"] in visible_ids and data["target"] in visible_ids:
+            src, tgt = data["source"], data["target"]
+            if (src in visible_ids and tgt in visible_ids
+                    and location_by_id.get(src, "") == location_by_id.get(tgt, "")):
                 result.append(el)
         elif data.get("id") in visible_ids:
             new_data = {k: v for k, v in data.items() if k != "parent"}
