@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.047"
+VERSION = "2.0.048"
 
 import copy
 import os
@@ -982,9 +982,10 @@ clientside_callback(
                 var loc = node.data('location');
                 var blocked;
                 if (node.data('status') === 'PRIO') {
-                    // PRIO visible seulement si tous les prédécesseurs sont DONE
+                    // PRIO bloqué seulement si un prédécesseur est TODO (pas encore dans row0)
                     blocked = preds.length > 0 && preds.some(function(p) {
-                        return (p.data('status') || '').indexOf('DONE') < 0;
+                        var pst = p.data('status') || '';
+                        return pst === 'TODO';
                     });
                 } else {
                     // TODO visible si au moins un prédécesseur same-project est unblocking
