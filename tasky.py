@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.042"
+VERSION = "2.0.043"
 
 import copy
 import os
@@ -835,8 +835,7 @@ def build_execution_elements(elements_state: list) -> list:
         preds_by_target.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return ("Ready" in st or "ToBuy" in st or "DONE" in st
-                or st == "TOPRIO" or st == "PRIO")
+        return "Ready" in st or "ToBuy" in st or "DONE" in st
 
     visible_ids: set = set()
     for nid, st in status_by_id.items():
@@ -1077,7 +1076,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         preds_all.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "ToBuy" in st or "DONE" in st or st in ("TOPRIO", "PRIO")
+        return "Ready" in st or "ToBuy" in st or "DONE" in st
 
     # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
     row0: set = set()
