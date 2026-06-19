@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.042-exec-prio-order.001"
+VERSION = "2.0.042-exec-prio-order.002"
 
 import copy
 import os
@@ -1159,15 +1159,15 @@ def compute_exec_positions(view_mode, elements_state, meta):
         r0_idx = {nid: i for i, nid in enumerate(r0)}
         r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
 
-        # Passe 2 : trier r0 par barycentre sur r1 (quick en tête, puis TOPRIO, puis le reste)
+        # Passe 2 : trier r0 par barycentre sur r1 (PRIO/TOPRIO en tête, puis quick, puis le reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
-        quick     = [nid for nid in r0 if node_data_by_id[nid].get("quick")]
-        toprio    = [nid for nid in r0 if not node_data_by_id[nid].get("quick") and status_by_id.get(nid) == "TOPRIO"]
-        non_quick = [nid for nid in r0 if not node_data_by_id[nid].get("quick") and status_by_id.get(nid) != "TOPRIO"]
+        prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO", "PRIO")]
+        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO") and node_data_by_id[nid].get("quick")]
+        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO") and not node_data_by_id[nid].get("quick")]
+        prio_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
-        toprio.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         non_quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
-        r0 = quick + toprio + non_quick
+        r0 = prio_r0 + quick + non_quick
 
         # Passe 3 : retrier r1 avec le nouvel ordre r0
         r0_idx = {nid: i for i, nid in enumerate(r0)}
@@ -1176,18 +1176,23 @@ def compute_exec_positions(view_mode, elements_state, meta):
         by_project[loc][0] = r0
         by_project[loc][1] = r1
 
-    # Pièces avec au moins une tâche prioritaire (TOPRIO ou PRIO) dans la vue Exécution
+    # Classifier les projets pour le tri
     prio_projects: set = set()
+    quick_projects: set = set()
     for loc, rows in by_project.items():
         for nid in rows[0] + rows[1]:
             if status_by_id.get(nid) in ("TOPRIO", "PRIO"):
                 prio_projects.add(loc)
-                break
+            if node_data_by_id.get(nid, {}).get("quick"):
+                quick_projects.add(loc)
 
-    # Trier : prioritaires d'abord, puis par nombre de tâches restantes (ascendant)
+    # Trier : PRIO/TOPRIO d'abord, puis quick, puis le plus de tâches restantes
     sorted_projects = sorted(
         by_project.keys(),
-        key=lambda loc: (0 if loc in prio_projects else 1, remaining_by_project.get(loc, 0))
+        key=lambda loc: (
+            0 if loc in prio_projects else 1 if loc in quick_projects else 2,
+            -remaining_by_project.get(loc, 0)
+        )
     )
 
     NODE_W   = 220
