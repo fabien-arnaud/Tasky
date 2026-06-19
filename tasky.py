@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.0.041"
+VERSION = "2.0.042-exec-prio-order.001"
 
 import copy
 import os
@@ -1176,8 +1176,19 @@ def compute_exec_positions(view_mode, elements_state, meta):
         by_project[loc][0] = r0
         by_project[loc][1] = r1
 
-    # Trier les projets par nombre de tâches restantes (ascendant)
-    sorted_projects = sorted(by_project.keys(), key=lambda loc: remaining_by_project.get(loc, 0))
+    # Pièces avec au moins une tâche prioritaire (TOPRIO ou PRIO) dans la vue Exécution
+    prio_projects: set = set()
+    for loc, rows in by_project.items():
+        for nid in rows[0] + rows[1]:
+            if status_by_id.get(nid) in ("TOPRIO", "PRIO"):
+                prio_projects.add(loc)
+                break
+
+    # Trier : prioritaires d'abord, puis par nombre de tâches restantes (ascendant)
+    sorted_projects = sorted(
+        by_project.keys(),
+        key=lambda loc: (0 if loc in prio_projects else 1, remaining_by_project.get(loc, 0))
+    )
 
     NODE_W   = 220
     GROUP_GAP = 80   # extra pixels between groups within a project
