@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.003"
+VERSION = "2.1.004"
 
 import copy
 import os
@@ -982,7 +982,7 @@ clientside_callback(
             function isUnblocking(p) {
                 var st = p.data('status') || '';
                 return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                       st.indexOf('DONE') >= 0 || st === 'PRIO' || st === 'WIP';
+                       st === 'PRIO' || st === 'WIP';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
                 var preds = node.incomers('[is_group != "True"]');
@@ -1101,9 +1101,6 @@ def compute_exec_positions(view_mode, elements_state, meta):
         s, t = edge["data"]["source"], edge["data"]["target"]
         preds_all.setdefault(t, []).append(s)
 
-    def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "ToBuy" in st or "DONE" in st or st == "PRIO" or st == "WIP"
-
     # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
     row0: set = set()
     row1: set = set()
@@ -1121,7 +1118,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
             preds = preds_all.get(nid, [])
             loc = node_data_by_id[nid].get("location", "Sans projet")
             same_proj_unblocking = any(
-                is_unblocking(status_by_id.get(p, "")) and
+                p in row0 and
                 node_data_by_id.get(p, {}).get("location", "") == loc
                 for p in preds
             )
