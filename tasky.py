@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008"
+VERSION = "2.1.009"
 
 import copy
 import os
@@ -158,9 +158,10 @@ COLOR_GOAL_HL = "#9B8FBF"
 
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
 
-# Table visuelle : (type, status, quick) → {shape, bg, bw, bc}
+# Tables visuelles : (type, status, quick) → {shape, bg, bw, bc}
 # Chaque combinaison a une ligne explicite — pas de cascade CSS, pas d'override.
-VISUAL_TABLE = {
+
+VISUAL_TABLE_HISTORIC = {
     ("F", "TODO",         False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 0, "bc": "transparent"},
     ("A", "TODO",         False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 0, "bc": "transparent"},
     ("F", "DONE",         False): {"shape": "round-rectangle", "bg": COLOR_DONE,        "bw": 0, "bc": "transparent"},
@@ -173,26 +174,82 @@ VISUAL_TABLE = {
     ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
-    ("F", "WIP",           False): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
-    ("A", "WIP",           False): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
-    # TOPRIO = chemin critique bloqué (prédécesseurs non-DONE)
-    ("F", "TOPRIO",        False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("F", "TOPRIO",        True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",        False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",        True ): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    # TOPRIO_READY = chemin critique non bloqué (actionnable) → fond orange
-    ("F", "TOPRIO_READY",  False): {"shape": "round-rectangle", "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
-    ("F", "TOPRIO_READY",  True ): {"shape": "round-rectangle", "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO_READY",  False): {"shape": "ellipse",         "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO_READY",  True ): {"shape": "ellipse",         "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "WIP",          False): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
+    ("A", "WIP",          False): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
+    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY", False): {"shape": "round-rectangle", "bg": COLOR_WIP,         "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY", True ): {"shape": "round-rectangle", "bg": COLOR_WIP_HL,      "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY", False): {"shape": "ellipse",         "bg": COLOR_WIP,         "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY", True ): {"shape": "ellipse",         "bg": COLOR_WIP_HL,      "bw": 3, "bc": COLOR_WIP_HL},
     ("F", "PRIO",         False): {"shape": "round-rectangle", "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
     ("A", "PRIO",         False): {"shape": "ellipse",         "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
 }
+
+_NG_TODO  = "#D5E4EA"  # bleu très pâle (au lieu du vert)
+_NG_READY = "#8FAAB8"  # teal légèrement plus sombre
+_NG_READY_QUICK = "#4E8599"  # teal foncé légèrement plus sombre
+
+VISUAL_TABLE_NEWGEN = dict(VISUAL_TABLE_HISTORIC)
+VISUAL_TABLE_NEWGEN.update({
+    ("F", "TODO",         False): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 0, "bc": "transparent"},
+    ("A", "TODO",         False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        False): {"shape": "round-rectangle", "bg": _NG_READY,       "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        True ): {"shape": "round-rectangle", "bg": _NG_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        False): {"shape": "ellipse",         "bg": _NG_READY,       "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        True ): {"shape": "ellipse",         "bg": _NG_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("F", "Ready-Critic", False): {"shape": "round-rectangle", "bg": _NG_READY,       "bw": 3, "bc": "#E05050"},
+    ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": _NG_READY,       "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+})
+
+VISUAL_TABLE_DARK = {
+    ("F", "TODO",         False): {"shape": "round-rectangle", "bg": "#2D3A2D", "bw": 0, "bc": "transparent"},
+    ("A", "TODO",         False): {"shape": "ellipse",         "bg": "#2D3A2D", "bw": 0, "bc": "transparent"},
+    ("F", "DONE",         False): {"shape": "round-rectangle", "bg": "#2A2A28", "bw": 0, "bc": "transparent"},
+    ("A", "DONE",         False): {"shape": "ellipse",         "bg": "#2A2A28", "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        False): {"shape": "round-rectangle", "bg": "#2A3D47", "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        True ): {"shape": "round-rectangle", "bg": "#1A2D38", "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        False): {"shape": "ellipse",         "bg": "#2A3D47", "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        True ): {"shape": "ellipse",         "bg": "#1A2D38", "bw": 0, "bc": "transparent"},
+    ("F", "Ready-Critic", False): {"shape": "round-rectangle", "bg": "#2A3D47", "bw": 3, "bc": "#E05050"},
+    ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": "#1A2D38", "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": "#2A3D47", "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": "#1A2D38", "bw": 3, "bc": "#E05050"},
+    ("F", "WIP",          False): {"shape": "round-rectangle", "bg": "#4A4010", "bw": 0, "bc": "transparent"},
+    ("A", "WIP",          False): {"shape": "ellipse",         "bg": "#4A4010", "bw": 0, "bc": "transparent"},
+    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": "#2D3A2D", "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": "#2D3A2D", "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": "#2D3A2D", "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": "#2D3A2D", "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY", False): {"shape": "round-rectangle", "bg": "#7A4800", "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY", True ): {"shape": "round-rectangle", "bg": "#5A3400", "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY", False): {"shape": "ellipse",         "bg": "#7A4800", "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY", True ): {"shape": "ellipse",         "bg": "#5A3400", "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "PRIO",         False): {"shape": "round-rectangle", "bg": "#3A2D4A", "bw": 3, "bc": "#9B8FBF"},
+    ("A", "PRIO",         False): {"shape": "ellipse",         "bg": "#3A2D4A", "bw": 3, "bc": "#9B8FBF"},
+}
+
+VISUAL_THEMES = {
+    "historic": VISUAL_TABLE_HISTORIC,
+    "newgen":   VISUAL_TABLE_NEWGEN,
+    "dark":     VISUAL_TABLE_DARK,
+}
+CURRENT_THEME = "newgen"  # ← changer ici pour switcher de thème
+
 _VISUAL_DEFAULT = {"shape": "round-rectangle", "bg": COLOR_TODO, "bw": 0, "bc": "transparent"}
 
 
 def get_node_visual(node_type: str, status: str, quick: bool) -> dict:
-    return VISUAL_TABLE.get((node_type, status, bool(quick)), _VISUAL_DEFAULT)
+    table = VISUAL_THEMES.get(CURRENT_THEME, VISUAL_TABLE_HISTORIC)
+    return table.get((node_type, status, bool(quick)), _VISUAL_DEFAULT)
 
 
 def load_tasks_from_csv() -> Tuple[
