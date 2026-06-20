@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.010"
+VERSION = "2.1.008"
 
 import copy
 import os
