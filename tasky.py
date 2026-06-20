@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.002"
+VERSION = "2.1.008-color-wip-toprio.003"
 
 import copy
 import os
@@ -771,13 +771,13 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "selector": 'node[status = "TOPRIO"][?quick]',
         "style": {"background-color": COLOR_READY_QUICK},
     },
-    # Mise en avant du chemin de priorité
+    # Mise en avant du chemin de priorité (hors TOPRIO qui a sa propre bordure)
     {
-        "selector": 'node[?priority_path]',
+        "selector": 'node[?priority_path][status != "TOPRIO"]',
         "style": {"border-width": 3, "border-color": "red"},
     },
-    # TOPRIO : bordure orange foncé (double attribut = spécificité > priority_path seul)
-    {"selector": 'node[status = "TOPRIO"][?priority_path]', "style": {
+    # TOPRIO bloqué : bordure orange foncé
+    {"selector": 'node[status = "TOPRIO"]', "style": {
         "border-width": 3, "border-color": COLOR_WIP_HL,
     }},
     # TOPRIO actionable (count_lockers == 0) : fond orange en plus
