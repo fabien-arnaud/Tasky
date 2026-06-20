@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.012"
+VERSION = "2.1.008-color-wip-toprio.013"
 
 import copy
 import os
@@ -188,7 +188,27 @@ VISUAL_TABLE_HISTORIC = {
     ("A", "PRIO",         False): {"shape": "ellipse",         "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
 }
 
-VISUAL_TABLE_NEWGEN = dict(VISUAL_TABLE_HISTORIC)  # base = HISTORIC, à personnaliser
+_NG_TODO  = "#D5E4EA"  # bleu très pâle (au lieu du vert)
+_NG_READY = "#8FAAB8"  # teal légèrement plus sombre
+_NG_READY_QUICK = "#4E8599"  # teal foncé légèrement plus sombre
+
+VISUAL_TABLE_NEWGEN = dict(VISUAL_TABLE_HISTORIC)
+VISUAL_TABLE_NEWGEN.update({
+    ("F", "TODO",         False): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 0, "bc": "transparent"},
+    ("A", "TODO",         False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        False): {"shape": "round-rectangle", "bg": _NG_READY,       "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        True ): {"shape": "round-rectangle", "bg": _NG_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        False): {"shape": "ellipse",         "bg": _NG_READY,       "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        True ): {"shape": "ellipse",         "bg": _NG_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("F", "Ready-Critic", False): {"shape": "round-rectangle", "bg": _NG_READY,       "bw": 3, "bc": "#E05050"},
+    ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": _NG_READY,       "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+})
 
 VISUAL_TABLE_DARK = {
     ("F", "TODO",         False): {"shape": "round-rectangle", "bg": "#2D3A2D", "bw": 0, "bc": "transparent"},
