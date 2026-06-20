@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.006"
+VERSION = "2.1.008-color-wip-toprio.007"
 
 import copy
 import os
@@ -179,11 +179,11 @@ VISUAL_TABLE = {
     ("F", "TOPRIO",        True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
     ("A", "TOPRIO",        False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
     ("A", "TOPRIO",        True ): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    # TOPRIO_READY = chemin critique non bloqué (actionnable)
-    ("F", "TOPRIO_READY",  False): {"shape": "round-rectangle", "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
-    ("F", "TOPRIO_READY",  True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO_READY",  False): {"shape": "ellipse",         "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO_READY",  True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
+    # TOPRIO_READY = chemin critique non bloqué (actionnable) → fond orange
+    ("F", "TOPRIO_READY",  False): {"shape": "round-rectangle", "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY",  True ): {"shape": "round-rectangle", "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  False): {"shape": "ellipse",         "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  True ): {"shape": "ellipse",         "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
     ("F", "PRIO",         False): {"shape": "round-rectangle", "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
     ("A", "PRIO",         False): {"shape": "ellipse",         "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
 }
