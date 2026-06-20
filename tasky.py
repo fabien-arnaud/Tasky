@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.007"
+VERSION = "2.1.008-color-wip-toprio.008"
 
 import copy
 import os
@@ -145,8 +145,9 @@ COLOR_READY = "#A7B7C2"
 COLOR_READY_QUICK = "#5B91A8"
 COLOR_URGENT = "#A7B7C2"
 COLOR_GOAL = "#C5BAD8"
-COLOR_WIP  = "#E8A838"   # orange — tâche en cours
-COLOR_WIP_HL = "#C07A10" # orange foncé
+COLOR_WIP     = "#E8A838"   # orange — TOPRIO_READY
+COLOR_WIP_HL  = "#C07A10"   # orange foncé
+COLOR_WIP_NODE = "#F0CC50"  # jaune doré — WIP
 
 # Couleurs de highlight (surlignage au clic : chaque nœud selon son statut réel)
 COLOR_TODO_HL = "#7E8570"
@@ -172,8 +173,8 @@ VISUAL_TABLE = {
     ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
-    ("F", "WIP",           False): {"shape": "round-rectangle", "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
-    ("A", "WIP",           False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
+    ("F", "WIP",           False): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
+    ("A", "WIP",           False): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
     # TOPRIO = chemin critique bloqué (prédécesseurs non-DONE)
     ("F", "TOPRIO",        False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
     ("F", "TOPRIO",        True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
