@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.005"
+VERSION = "2.1.006"
 
 import copy
 import os
@@ -1128,16 +1128,20 @@ def compute_exec_positions(view_mode, elements_state, meta):
             if preds and same_proj_unblocking:
                 row1.add(nid)
 
-    # Passe supplémentaire : nœuds PRIO dont tous les prédécesseurs visibles sont en row0
-    # (les prédécesseurs TODO non-row0 seront cachés par le JS → on les ignore)
-    for nid, st in status_by_id.items():
-        if nid in row0 or nid in row1 or "DONE" in st or st != "PRIO":
-            continue
-        preds = preds_all.get(nid, [])
-        non_done_preds = [p for p in preds if "DONE" not in status_by_id.get(p, "")]
-        visible_preds = [p for p in non_done_preds if p in row0 or p in row1]
-        if visible_preds and all(p in row0 or p in row1 for p in visible_preds):
-            row1.add(nid)
+    # Passe supplémentaire itérative : PRIO dont tous les prédécesseurs visibles sont en row0/row1
+    # Répétée jusqu'à convergence pour gérer les chaînes de PRIO (PRIO→PRIO→PRIO)
+    changed = True
+    while changed:
+        changed = False
+        for nid, st in status_by_id.items():
+            if nid in row0 or nid in row1 or "DONE" in st or st != "PRIO":
+                continue
+            preds = preds_all.get(nid, [])
+            non_done_preds = [p for p in preds if "DONE" not in status_by_id.get(p, "")]
+            visible_preds = [p for p in non_done_preds if p in row0 or p in row1]
+            if visible_preds and all(p in row0 or p in row1 for p in visible_preds):
+                row1.add(nid)
+                changed = True
 
     # Graphe restreint aux nœuds visibles — utilisé pour tri barycentre et groupes
     visible = row0 | row1
@@ -1318,6 +1322,25 @@ clientside_callback(
                 var n = window.cy.getElementById(id);
                 if (n.length && !n.hidden()) n.position(execPositions[id]);
             });
+        });
+        // Python fait autorité : cacher tout nœud visible sans position exec (ex: PRIO en chaîne)
+        window.cy.nodes('[is_group != "True"]:visible').forEach(function(node) {
+            if (!execPositions[node.id()]) {
+                node.hide();
+                node.connectedEdges().hide();
+            }
+        });
+        // Re-appliquer les filtres d'arêtes (cross-project + sortantes row1)
+        window.cy.edges(':visible').forEach(function(edge) {
+            if (edge.source().data('location') !== edge.target().data('location')) {
+                edge.hide();
+            }
+        });
+        window.cy.edges(':visible').forEach(function(edge) {
+            var st = edge.source().data('status') || '';
+            var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                         st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+            if (!isRow0) { edge.hide(); }
         });
         window.cy.fit(window.cy.elements(':visible'), 50);
         return 0;
