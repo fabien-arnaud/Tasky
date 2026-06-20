@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.011"
+VERSION = "2.1.008-color-wip-toprio.012"
 
 import copy
 import os
@@ -222,7 +222,7 @@ VISUAL_THEMES = {
     "newgen":   VISUAL_TABLE_NEWGEN,
     "dark":     VISUAL_TABLE_DARK,
 }
-CURRENT_THEME = "dark"  # ← changer ici pour switcher de thème
+CURRENT_THEME = "newgen"  # ← changer ici pour switcher de thème
 
 _VISUAL_DEFAULT = {"shape": "round-rectangle", "bg": COLOR_TODO, "bw": 0, "bc": "transparent"}
 
