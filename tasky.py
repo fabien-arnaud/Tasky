@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.006"
+VERSION = "2.1.007"
 
 import copy
 import os
@@ -1104,7 +1104,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         s, t = edge["data"]["source"], edge["data"]["target"]
         preds_all.setdefault(t, []).append(s)
 
-    # Classer les nœuds visibles en ligne 0 (actionnables) ou ligne 1 (prochains)
+    # Passe 1 : row0 (actionnables) — doit être complet avant de calculer row1
     row0: set = set()
     row1: set = set()
     for nid, st in status_by_id.items():
@@ -1113,20 +1113,23 @@ def compute_exec_positions(view_mode, elements_state, meta):
         if "Ready" in st or "ToBuy" in st or st == "WIP" or st == "TOPRIO":
             row0.add(nid)
         elif st == "PRIO":
-            # PRIO visible seulement si tous les prédécesseurs sont DONE
             preds = preds_all.get(nid, [])
             if not preds or all("DONE" in status_by_id.get(p, "") for p in preds):
                 row0.add(nid)
-        elif st == "TODO":
-            preds = preds_all.get(nid, [])
-            loc = node_data_by_id[nid].get("location", "Sans projet")
-            same_proj_unblocking = any(
-                p in row0 and
-                node_data_by_id.get(p, {}).get("location", "") == loc
-                for p in preds
-            )
-            if preds and same_proj_unblocking:
-                row1.add(nid)
+
+    # Passe 2 : row1 (prochains) — row0 complet, plus de dépendance d'ordre
+    for nid, st in status_by_id.items():
+        if nid in row0 or "DONE" in st or st != "TODO":
+            continue
+        preds = preds_all.get(nid, [])
+        loc = node_data_by_id[nid].get("location", "Sans projet")
+        same_proj_unblocking = any(
+            p in row0 and
+            node_data_by_id.get(p, {}).get("location", "") == loc
+            for p in preds
+        )
+        if preds and same_proj_unblocking:
+            row1.add(nid)
 
     # Passe supplémentaire itérative : PRIO dont tous les prédécesseurs visibles sont en row0/row1
     # Répétée jusqu'à convergence pour gérer les chaînes de PRIO (PRIO→PRIO→PRIO)
