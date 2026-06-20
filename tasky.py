@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.004"
+VERSION = "2.1.005"
 
 import copy
 import os
@@ -1003,15 +1003,18 @@ clientside_callback(
                 }
                 if (blocked) { node.hide(); node.connectedEdges().hide(); }
             });
+            // Passe 1 : cacher toutes les arêtes cross-project (inconditionnellement)
             window.cy.edges(':visible').forEach(function(edge) {
-                var src = edge.source();
-                var st = src.data('status') || '';
-                // Cacher les arêtes cross-project et les arêtes sortantes de row1
-                var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                             st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
-                if (!isRow0 || src.data('location') !== edge.target().data('location')) {
+                if (edge.source().data('location') !== edge.target().data('location')) {
                     edge.hide();
                 }
+            });
+            // Passe 2 : cacher les arêtes sortantes des nœuds row1 (non row0)
+            window.cy.edges(':visible').forEach(function(edge) {
+                var st = edge.source().data('status') || '';
+                var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                             st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+                if (!isRow0) { edge.hide(); }
             });
             window.cy.nodes('[is_group = "True"]').addClass('exec-hide-group');
             window.cy.nodes('[is_group != "True"]').ungrabify();
