@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.009"
+VERSION = "2.1.010"
 
 import copy
 import os
@@ -208,6 +208,7 @@ VISUAL_TABLE_NEWGEN.update({
     ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
     ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
     ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "WIP",          False): {"shape": "ellipse",         "bg": "#A8C8A0",       "bw": 0, "bc": "transparent"},
 })
 
 VISUAL_TABLE_DARK = {
