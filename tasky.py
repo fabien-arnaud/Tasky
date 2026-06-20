@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.005"
+VERSION = "2.1.008-color-wip-toprio.006"
 
 import copy
 import os
@@ -172,12 +172,18 @@ VISUAL_TABLE = {
     ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
-    ("F", "WIP",          False): {"shape": "round-rectangle", "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
-    ("A", "WIP",          False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
-    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
-    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "WIP",           False): {"shape": "round-rectangle", "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
+    ("A", "WIP",           False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
+    # TOPRIO = chemin critique bloqué (prédécesseurs non-DONE)
+    ("F", "TOPRIO",        False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",        True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",        False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",        True ): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    # TOPRIO_READY = chemin critique non bloqué (actionnable)
+    ("F", "TOPRIO_READY",  False): {"shape": "round-rectangle", "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY",  True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  False): {"shape": "ellipse",         "bg": COLOR_URGENT,      "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": COLOR_WIP_HL},
     ("F", "PRIO",         False): {"shape": "round-rectangle", "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
     ("A", "PRIO",         False): {"shape": "ellipse",         "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
 }
@@ -278,11 +284,14 @@ def compute_statuses(
                 count_lockers[k] += 1
 
         if count_lockers[k] == 0:
-            if status_dict[k] not in ["DONE", "TOPRIO", "WIP"]:
+            if status_dict[k] == "TOPRIO":
+                status_dict[k] = "TOPRIO_READY"
+            elif status_dict[k] not in ["DONE", "WIP"]:
                 status_dict[k] = {"F": "Ready", "A": "Ready", "O": "DONE"}[types_dict[k]]
         else:
-            if status_dict[k] in ("TOPRIO", "Ready", "Ready-Critic"):
+            if status_dict[k] in ("Ready", "Ready-Critic"):
                 status_dict[k] = "TODO"
+            # TOPRIO reste TOPRIO quand bloqué
 
     # Marquage des tâches critiques
     for k in follow_dict.keys():
@@ -837,13 +846,13 @@ def build_execution_elements(elements_state: list) -> list:
         preds_by_target.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "DONE" in st
+        return "Ready" in st or "DONE" in st or st == "TOPRIO_READY"
 
     visible_ids: set = set()
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or st == "TOPRIO" or st == "PRIO":
+        if "Ready" in st or st in ("TOPRIO", "TOPRIO_READY") or st == "PRIO":
             visible_ids.add(nid)
         elif st == "TODO":
             preds = preds_by_target.get(nid, [])
@@ -975,7 +984,7 @@ clientside_callback(
             done.connectedEdges().hide();
             function isUnblocking(p) {
                 var st = p.data('status') || '';
-                return st.indexOf('Ready') >= 0 ||
+                return st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
                        st === 'PRIO' || st === 'WIP';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
@@ -1006,8 +1015,8 @@ clientside_callback(
             // Passe 2 : cacher les arêtes sortantes des nœuds row1 (non row0)
             window.cy.edges(':visible').forEach(function(edge) {
                 var st = edge.source().data('status') || '';
-                var isRow0 = st.indexOf('Ready') >= 0 ||
-                             st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+                var isRow0 = st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
+                             st === 'WIP' || st === 'PRIO';
                 if (!isRow0) { edge.hide(); }
             });
             window.cy.nodes('[is_group = "True"]').addClass('exec-hide-group');
@@ -1104,7 +1113,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or st == "WIP" or st == "TOPRIO":
+        if "Ready" in st or st == "WIP" or st == "TOPRIO_READY":
             row0.add(nid)
         elif st == "PRIO":
             preds = preds_all.get(nid, [])
@@ -1188,9 +1197,9 @@ def compute_exec_positions(view_mode, elements_state, meta):
         # Passe 2 : trier r0 par barycentre sur r1 (WIP en tête, puis PRIO/TOPRIO, puis quick, puis le reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
         wip_r0    = [nid for nid in r0 if status_by_id.get(nid) == "WIP"]
-        prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO", "PRIO")]
-        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
-        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
+        prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO")]
+        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
+        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
         wip_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         prio_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
@@ -1212,7 +1221,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         for nid in rows[0] + rows[1]:
             if status_by_id.get(nid) == "WIP":
                 wip_projects.add(loc)
-            if status_by_id.get(nid) in ("TOPRIO", "PRIO"):
+            if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO"):
                 prio_projects.add(loc)
             if node_data_by_id.get(nid, {}).get("quick"):
                 quick_projects.add(loc)
@@ -1335,8 +1344,8 @@ clientside_callback(
         });
         window.cy.edges(':visible').forEach(function(edge) {
             var st = edge.source().data('status') || '';
-            var isRow0 = st.indexOf('Ready') >= 0 ||
-                         st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+            var isRow0 = st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
+                         st === 'WIP' || st === 'PRIO';
             if (!isRow0) { edge.hide(); }
         });
         window.cy.fit(window.cy.elements(':visible'), 50);
@@ -1634,7 +1643,7 @@ clientside_callback(
                     var curStatus = target.data('status') || '';
                     var isTodo = curStatus === 'TODO' || curStatus.indexOf('Ready') >= 0;
                     var isWip  = curStatus === 'WIP';
-                    var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO';
+                    var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO' || curStatus === 'TOPRIO_READY';
                     var isDone = curStatus.indexOf('DONE') >= 0;
                     rows.push(menuRow((isTodo ? "✓ " : "   ") + "TODO",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }));
                     rows.push(menuRow((isWip  ? "✓ " : "   ") + "WIP 🔧",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"WIP"}); }));
