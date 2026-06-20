@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.008-color-wip-toprio.008"
+VERSION = "2.1.008-color-wip-toprio.009"
 
 import copy
 import os
@@ -147,7 +147,7 @@ COLOR_URGENT = "#A7B7C2"
 COLOR_GOAL = "#C5BAD8"
 COLOR_WIP     = "#E8A838"   # orange — TOPRIO_READY
 COLOR_WIP_HL  = "#C07A10"   # orange foncé
-COLOR_WIP_NODE = "#F0CC50"  # jaune doré — WIP
+COLOR_WIP_NODE = "#7DC47A"  # vert moyen — WIP
 
 # Couleurs de highlight (surlignage au clic : chaque nœud selon son statut réel)
 COLOR_TODO_HL = "#7E8570"
