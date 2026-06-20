@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.007"
+VERSION = "2.1.008"
 
 import copy
 import os
@@ -145,8 +145,9 @@ COLOR_READY = "#A7B7C2"
 COLOR_READY_QUICK = "#5B91A8"
 COLOR_URGENT = "#A7B7C2"
 COLOR_GOAL = "#C5BAD8"
-COLOR_WIP  = "#E8A838"   # orange — tâche en cours
-COLOR_WIP_HL = "#C07A10" # orange foncé
+COLOR_WIP     = "#E8A838"   # orange — TOPRIO_READY
+COLOR_WIP_HL  = "#C07A10"   # orange foncé
+COLOR_WIP_NODE = "#F0CC50"  # jaune doré — WIP
 
 # Couleurs de highlight (surlignage au clic : chaque nœud selon son statut réel)
 COLOR_TODO_HL = "#7E8570"
@@ -156,6 +157,42 @@ COLOR_URGENT_HL = "#8FA1AB"
 COLOR_GOAL_HL = "#9B8FBF"
 
 # Couleurs dédiées aux arêtes du surlignage (ancêtres vs descendants), pour garder la lecture du sens
+
+# Table visuelle : (type, status, quick) → {shape, bg, bw, bc}
+# Chaque combinaison a une ligne explicite — pas de cascade CSS, pas d'override.
+VISUAL_TABLE = {
+    ("F", "TODO",         False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 0, "bc": "transparent"},
+    ("A", "TODO",         False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 0, "bc": "transparent"},
+    ("F", "DONE",         False): {"shape": "round-rectangle", "bg": COLOR_DONE,        "bw": 0, "bc": "transparent"},
+    ("A", "DONE",         False): {"shape": "ellipse",         "bg": COLOR_DONE,        "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        False): {"shape": "round-rectangle", "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
+    ("F", "Ready",        True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 0, "bc": "transparent"},
+    ("A", "Ready",        True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 0, "bc": "transparent"},
+    ("F", "Ready-Critic", False): {"shape": "round-rectangle", "bg": COLOR_READY,       "bw": 3, "bc": "#E05050"},
+    ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": COLOR_READY,       "bw": 3, "bc": "#E05050"},
+    ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": COLOR_READY_QUICK, "bw": 3, "bc": "#E05050"},
+    ("F", "WIP",           False): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
+    ("A", "WIP",           False): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,    "bw": 0, "bc": "transparent"},
+    # TOPRIO = chemin critique bloqué (prédécesseurs non-DONE)
+    ("F", "TOPRIO",        False): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",        True ): {"shape": "round-rectangle", "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",        False): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",        True ): {"shape": "ellipse",         "bg": COLOR_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
+    # TOPRIO_READY = chemin critique non bloqué (actionnable) → fond orange
+    ("F", "TOPRIO_READY",  False): {"shape": "round-rectangle", "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY",  True ): {"shape": "round-rectangle", "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  False): {"shape": "ellipse",         "bg": COLOR_WIP,     "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY",  True ): {"shape": "ellipse",         "bg": COLOR_WIP_HL,  "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "PRIO",         False): {"shape": "round-rectangle", "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
+    ("A", "PRIO",         False): {"shape": "ellipse",         "bg": COLOR_GOAL,        "bw": 3, "bc": "#9B8FBF"},
+}
+_VISUAL_DEFAULT = {"shape": "round-rectangle", "bg": COLOR_TODO, "bw": 0, "bc": "transparent"}
+
+
+def get_node_visual(node_type: str, status: str, quick: bool) -> dict:
+    return VISUAL_TABLE.get((node_type, status, bool(quick)), _VISUAL_DEFAULT)
 
 
 def load_tasks_from_csv() -> Tuple[
@@ -184,7 +221,7 @@ def load_tasks_from_csv() -> Tuple[
                 continue
             types_dict[i] = row["type"].strip()
             _s = row["status"].strip()
-            _canon = {"READY": "Ready", "TOBUY": "ToBuy", "READY-CRITIC": "Ready-Critic", "TOBUY-CRITIC": "ToBuy-Critic"}
+            _canon = {"READY": "Ready", "TOBUY": "Ready", "READY-CRITIC": "Ready-Critic", "TOBUY-CRITIC": "Ready-Critic"}
             status_dict[i] = _canon.get(_s.upper(), _s.upper())
             location_dict[i] = row["location"].strip()
             desc_dict[i] = i + ": " + row["description"].strip()
@@ -248,20 +285,23 @@ def compute_statuses(
                 count_lockers[k] += 1
 
         if count_lockers[k] == 0:
-            if status_dict[k] not in ["DONE", "TOPRIO", "WIP"]:
-                status_dict[k] = {"F": "Ready", "A": "ToBuy", "O": "DONE"}[types_dict[k]]
+            if status_dict[k] == "TOPRIO":
+                status_dict[k] = "TOPRIO_READY"
+            elif status_dict[k] not in ["DONE", "WIP"]:
+                status_dict[k] = {"F": "Ready", "A": "Ready", "O": "DONE"}[types_dict[k]]
         else:
-            if status_dict[k] in ("TOPRIO", "Ready", "ToBuy", "Ready-Critic", "ToBuy-Critic"):
+            if status_dict[k] in ("Ready", "Ready-Critic"):
                 status_dict[k] = "TODO"
+            # TOPRIO reste TOPRIO quand bloqué
 
     # Marquage des tâches critiques
     for k in follow_dict.keys():
         if len(follow_dict[k]) > 0:
-            if status_dict[k] in ["Ready", "ToBuy"]:
+            if status_dict[k] in ["Ready"]:
                 if min([count_lockers[a] for a in follow_dict[k]]) == 1:
                     status_dict[k] = status_dict[k] + "-" + "Critic"
         else:
-            if status_dict[k] in ["Ready", "ToBuy"]:
+            if status_dict[k] in ["Ready"]:
                 status_dict[k] = status_dict[k] + "-" + "Critic"
 
     return count_lockers, priority_paths_tasks
@@ -341,6 +381,7 @@ def build_cytoscape_elements(
             parent_id = f"group::{loc}"
 
         is_quick = (quick_dict or {}).get(task_id, False)
+        _visual = get_node_visual(types_dict[task_id], status_dict[task_id], is_quick)
         data = {
             "id": task_id,
             "label": ("⚡ " if is_quick else "") + desc_dict[task_id],
@@ -350,6 +391,10 @@ def build_cytoscape_elements(
             "count_lockers": count_lockers.get(task_id, 0),
             "priority_path": task_id in priority_paths_tasks,
             "quick": is_quick,
+            "node_shape": _visual["shape"],
+            "node_bg":    _visual["bg"],
+            "node_bw":    _visual["bw"],
+            "node_bc":    _visual["bc"],
         }
         if parent_id is not None:
             data["parent"] = parent_id
@@ -528,6 +573,11 @@ def patch_elements_after_dependency_change(
         if node_id in desc_dict:
             data["label"] = ("⚡ " if quick_dict.get(node_id, False) else "") + desc_dict[node_id]
         data["quick"] = quick_dict.get(node_id, False)
+        _v = get_node_visual(data["type"], data["status"], data["quick"])
+        data["node_shape"] = _v["shape"]
+        data["node_bg"]    = _v["bg"]
+        data["node_bw"]    = _v["bw"]
+        data["node_bc"]    = _v["bc"]
 
     return out
 
@@ -718,69 +768,23 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "events": "no",
         },
     },
-    # Formes par type (approximation de ton Graphviz)
+    # Nœuds tâches : forme, fond et bordure viennent des données Python (VISUAL_TABLE)
     {
-        "selector": 'node[type = "A"]',
-        "style": {"shape": "ellipse"},
-    },
-    {
-        "selector": 'node[type = "F"]',
-        "style": {"shape": "round-rectangle"},
-    },
-    {
-        "selector": 'node[type = "O"]',
+        "selector": 'node[is_group != "True"]',
         "style": {
-            "shape": "triangle",
-            "background-color": COLOR_GOAL,
+            "shape":            "data(node_shape)",
+            "background-color": "data(node_bg)",
+            "border-width":     "data(node_bw)",
+            "border-color":     "data(node_bc)",
         },
     },
-    # Couleurs par statut principal
-    {"selector": 'node[status = "TODO"]', "style": {"background-color": COLOR_TODO}},
-    {"selector": 'node[status = "WIP"]', "style": {
-        "background-color": COLOR_WIP,
-        "border-width": 3,
-        "border-color": COLOR_WIP_HL,
-    }},
+    # Nœud objectif (type O) — forme triangle, fond lavande
     {
-        "selector": 'node[status = "PRIO"]',
-        # Même couleur que les objectifs (rouge doux)
-        "style": {"background-color": COLOR_GOAL},
+        "selector": 'node[type = "O"]',
+        "style": {"shape": "triangle", "background-color": COLOR_GOAL},
     },
-    {
-        "selector": 'node[status = "TOPRIO"]',
-        "style": {"background-color": COLOR_URGENT},
-    },
-    {"selector": 'node[status = "DONE"]', "style": {"background-color": COLOR_DONE, "opacity": 0.3}},
-    {
-        "selector": 'node[status *= "Ready"]',
-        "style": {"background-color": COLOR_READY},
-    },
-    {
-        "selector": 'node[status *= "ToBuy"]',
-        "style": {"background-color": COLOR_READY},
-    },
-    {
-        "selector": 'node[status *= "Ready"][?quick]',
-        "style": {"background-color": COLOR_READY_QUICK},
-    },
-    {
-        "selector": 'node[status *= "ToBuy"][?quick]',
-        "style": {"background-color": COLOR_READY_QUICK},
-    },
-    {
-        "selector": 'node[status = "TOPRIO"][?quick]',
-        "style": {"background-color": COLOR_READY_QUICK},
-    },
-    # Mise en avant du chemin de priorité
-    {
-        "selector": 'node[?priority_path]',
-        "style": {"border-width": 3, "border-color": "red"},
-    },
-    # Objectif PRIO : cerclage violet (écrase le rouge du chemin prioritaire)
-    {
-        "selector": 'node[status = "PRIO"]',
-        "style": {"border-width": 3, "border-color": "#9B8FBF"},
-    },
+    # DONE : opacité réduite (ne peut pas venir de data())
+    {"selector": 'node[status = "DONE"]', "style": {"opacity": 0.3}},
     {
         "selector": "node:selected",
         "style": {
@@ -843,13 +847,13 @@ def build_execution_elements(elements_state: list) -> list:
         preds_by_target.setdefault(t, []).append(s)
 
     def is_unblocking(st: str) -> bool:
-        return "Ready" in st or "ToBuy" in st or "DONE" in st
+        return "Ready" in st or "DONE" in st or st == "TOPRIO_READY"
 
     visible_ids: set = set()
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or "ToBuy" in st or st == "TOPRIO" or st == "PRIO":
+        if "Ready" in st or st in ("TOPRIO", "TOPRIO_READY") or st == "PRIO":
             visible_ids.add(nid)
         elif st == "TODO":
             preds = preds_by_target.get(nid, [])
@@ -981,7 +985,7 @@ clientside_callback(
             done.connectedEdges().hide();
             function isUnblocking(p) {
                 var st = p.data('status') || '';
-                return st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
+                return st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
                        st === 'PRIO' || st === 'WIP';
             }
             window.cy.nodes('[status = "TODO"],[status = "PRIO"]').forEach(function(node) {
@@ -1012,8 +1016,8 @@ clientside_callback(
             // Passe 2 : cacher les arêtes sortantes des nœuds row1 (non row0)
             window.cy.edges(':visible').forEach(function(edge) {
                 var st = edge.source().data('status') || '';
-                var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                             st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+                var isRow0 = st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
+                             st === 'WIP' || st === 'PRIO';
                 if (!isRow0) { edge.hide(); }
             });
             window.cy.nodes('[is_group = "True"]').addClass('exec-hide-group');
@@ -1110,7 +1114,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or "ToBuy" in st or st == "WIP" or st == "TOPRIO":
+        if "Ready" in st or st == "WIP" or st == "TOPRIO_READY":
             row0.add(nid)
         elif st == "PRIO":
             preds = preds_all.get(nid, [])
@@ -1194,9 +1198,9 @@ def compute_exec_positions(view_mode, elements_state, meta):
         # Passe 2 : trier r0 par barycentre sur r1 (WIP en tête, puis PRIO/TOPRIO, puis quick, puis le reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
         wip_r0    = [nid for nid in r0 if status_by_id.get(nid) == "WIP"]
-        prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO", "PRIO")]
-        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
-        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
+        prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO")]
+        quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
+        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
         wip_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         prio_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
@@ -1218,7 +1222,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
         for nid in rows[0] + rows[1]:
             if status_by_id.get(nid) == "WIP":
                 wip_projects.add(loc)
-            if status_by_id.get(nid) in ("TOPRIO", "PRIO"):
+            if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO"):
                 prio_projects.add(loc)
             if node_data_by_id.get(nid, {}).get("quick"):
                 quick_projects.add(loc)
@@ -1341,8 +1345,8 @@ clientside_callback(
         });
         window.cy.edges(':visible').forEach(function(edge) {
             var st = edge.source().data('status') || '';
-            var isRow0 = st.indexOf('Ready') >= 0 || st.indexOf('ToBuy') >= 0 ||
-                         st === 'TOPRIO' || st === 'WIP' || st === 'PRIO';
+            var isRow0 = st.indexOf('Ready') >= 0 || st === 'TOPRIO_READY' ||
+                         st === 'WIP' || st === 'PRIO';
             if (!isRow0) { edge.hide(); }
         });
         window.cy.fit(window.cy.elements(':visible'), 50);
@@ -1638,9 +1642,9 @@ clientside_callback(
 
                 if (isOnNode && nodeIds.length > 0) {
                     var curStatus = target.data('status') || '';
-                    var isTodo = curStatus === 'TODO' || curStatus.indexOf('Ready') >= 0 || curStatus.indexOf('ToBuy') >= 0;
+                    var isTodo = curStatus === 'TODO' || curStatus.indexOf('Ready') >= 0;
                     var isWip  = curStatus === 'WIP';
-                    var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO';
+                    var isPrio = curStatus === 'PRIO' || curStatus === 'TOPRIO' || curStatus === 'TOPRIO_READY';
                     var isDone = curStatus.indexOf('DONE') >= 0;
                     rows.push(menuRow((isTodo ? "✓ " : "   ") + "TODO",    function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"TODO"}); }));
                     rows.push(menuRow((isWip  ? "✓ " : "   ") + "WIP 🔧",  function(){ dispatch({action:"set_status", node_ids:nodeIds, status:"WIP"}); }));
