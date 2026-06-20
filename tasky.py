@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.007"
+VERSION = "2.1.008-color-wip-toprio.001"
 
 import copy
 import os
@@ -737,9 +737,9 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
     # Couleurs par statut principal
     {"selector": 'node[status = "TODO"]', "style": {"background-color": COLOR_TODO}},
     {"selector": 'node[status = "WIP"]', "style": {
-        "background-color": COLOR_WIP,
+        "background-color": COLOR_READY,
         "border-width": 3,
-        "border-color": COLOR_WIP_HL,
+        "border-color": "red",
     }},
     {
         "selector": 'node[status = "PRIO"]',
@@ -776,6 +776,15 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "selector": 'node[?priority_path]',
         "style": {"border-width": 3, "border-color": "red"},
     },
+    # TOPRIO : bordure orange foncé (écrase le rouge de priority_path)
+    {"selector": 'node[status = "TOPRIO"]', "style": {
+        "border-width": 3, "border-color": COLOR_WIP_HL,
+    }},
+    # TOPRIO actionable (count_lockers == 0) : fond orange en plus
+    {"selector": 'node[status = "TOPRIO"][count_lockers = 0]', "style": {
+        "background-color": COLOR_WIP,
+        "border-width": 3, "border-color": COLOR_WIP_HL,
+    }},
     # Objectif PRIO : cerclage violet (écrase le rouge du chemin prioritaire)
     {
         "selector": 'node[status = "PRIO"]',
