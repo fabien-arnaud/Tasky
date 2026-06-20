@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./deploy.sh)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

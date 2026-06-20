@@ -10,3 +10,4 @@ data/*.json
 !data/node_positions.example.json
 .env
 backup/
+.claude/settings.local.json
