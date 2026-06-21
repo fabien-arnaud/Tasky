@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.011"
+VERSION = "2.1.012"
 
 import copy
 import os
@@ -1172,7 +1172,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or st == "WIP" or st == "TOPRIO_READY":
+        if "Ready" in st or st in ("WIP", "TOPRIO", "TOPRIO_READY"):
             row0.add(nid)
         elif st == "PRIO":
             preds = preds_all.get(nid, [])
