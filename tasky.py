@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.019"
+VERSION = "2.1.020"
 
 import copy
 import os
@@ -815,7 +815,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "text-valign": "top",
             "text-halign": "center",
             "font-weight": "bold",
-            "font-size": "48px",
+            "font-size": "64px",
             "events": "no",
         },
     },
@@ -1112,7 +1112,7 @@ clientside_callback(
                     ctx.stroke();
                     var label = node.data('label') || '';
                     ctx.fillStyle = '#888888';
-                    ctx.font = 'bold 24px sans-serif';
+                    ctx.font = 'bold 18px sans-serif';
                     ctx.fillText(label, bb.x1 + 4, y - 6);
                 });
             }
