@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.016"
+VERSION = "2.1.017"
 
 import copy
 import os
@@ -1256,17 +1256,18 @@ def compute_exec_positions(view_mode, elements_state, meta):
         r0_idx = {nid: i for i, nid in enumerate(r0)}
         r1.sort(key=lambda nid: _barycenter(nid, preds_by_target, r0_idx))
 
-        # Passe 2 : trier r0 par barycentre sur r1 (WIP en tête, puis PRIO/TOPRIO, puis quick, puis le reste)
+        # Passe 2 : trier r0 (WIP F en tête, puis PRIO/TOPRIO, puis quick, puis WIP A + reste)
         r1_idx = {nid: i for i, nid in enumerate(r1)}
-        wip_r0    = [nid for nid in r0 if status_by_id.get(nid) == "WIP"]
+        wip_f_r0  = [nid for nid in r0 if status_by_id.get(nid) == "WIP" and node_data_by_id[nid].get("type") == "F"]
         prio_r0   = [nid for nid in r0 if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO")]
         quick     = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and node_data_by_id[nid].get("quick")]
-        non_quick = [nid for nid in r0 if status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and not node_data_by_id[nid].get("quick")]
-        wip_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
+        non_quick = [nid for nid in r0 if (status_by_id.get(nid) not in ("TOPRIO_READY", "PRIO", "WIP") and not node_data_by_id[nid].get("quick"))
+                     or (status_by_id.get(nid) == "WIP" and node_data_by_id[nid].get("type") == "A")]
+        wip_f_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         prio_r0.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
         non_quick.sort(key=lambda nid: _barycenter(nid, succs_by_source, r1_idx))
-        r0 = wip_r0 + prio_r0 + quick + non_quick
+        r0 = wip_f_r0 + prio_r0 + quick + non_quick
 
         # Passe 3 : retrier r1 avec le nouvel ordre r0
         r0_idx = {nid: i for i, nid in enumerate(r0)}
@@ -1281,7 +1282,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     quick_projects: set = set()
     for loc, rows in by_project.items():
         for nid in rows[0] + rows[1]:
-            if status_by_id.get(nid) == "WIP":
+            if status_by_id.get(nid) == "WIP" and node_data_by_id.get(nid, {}).get("type") == "F":
                 wip_projects.add(loc)
             if status_by_id.get(nid) in ("TOPRIO_READY", "PRIO"):
                 prio_projects.add(loc)
