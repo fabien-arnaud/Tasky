@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.013"
+VERSION = "2.1.014"
 
 import copy
 import os
@@ -204,11 +204,14 @@ VISUAL_TABLE_NEWGEN.update({
     ("F", "Ready-Critic", True ): {"shape": "round-rectangle", "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", False): {"shape": "ellipse",         "bg": _NG_READY,       "bw": 3, "bc": "#E05050"},
     ("A", "Ready-Critic", True ): {"shape": "ellipse",         "bg": _NG_READY_QUICK, "bw": 3, "bc": "#E05050"},
-    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": _NG_TODO,        "bw": 3, "bc": COLOR_WIP_HL},
-    ("A", "WIP",          False): {"shape": "ellipse",         "bg": "#B0CCCA",       "bw": 0, "bc": "transparent"},
+    ("F", "TOPRIO",       False): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,   "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO",       True ): {"shape": "round-rectangle", "bg": COLOR_WIP_NODE,   "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       False): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,   "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO",       True ): {"shape": "ellipse",         "bg": COLOR_WIP_NODE,   "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "TOPRIO_READY", True ): {"shape": "round-rectangle", "bg": "#7A3A10",        "bw": 3, "bc": COLOR_WIP_HL},
+    ("A", "TOPRIO_READY", True ): {"shape": "ellipse",         "bg": "#7A3A10",        "bw": 3, "bc": COLOR_WIP_HL},
+    ("F", "WIP",          True ): {"shape": "round-rectangle", "bg": COLOR_WIP,        "bw": 0, "bc": "transparent"},
+    ("A", "WIP",          False): {"shape": "ellipse",         "bg": "#B0CCCA",        "bw": 0, "bc": "transparent"},
 })
 
 VISUAL_TABLE_DARK = {
