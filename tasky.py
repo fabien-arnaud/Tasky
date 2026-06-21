@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.012"
+VERSION = "2.1.013"
 
 import copy
 import os
@@ -1172,7 +1172,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
     for nid, st in status_by_id.items():
         if "DONE" in st:
             continue
-        if "Ready" in st or st in ("WIP", "TOPRIO", "TOPRIO_READY"):
+        if "Ready" in st or st in ("WIP", "TOPRIO_READY"):
             row0.add(nid)
         elif st == "PRIO":
             preds = preds_all.get(nid, [])
@@ -1181,7 +1181,7 @@ def compute_exec_positions(view_mode, elements_state, meta):
 
     # Passe 2 : row1 (prochains) — row0 complet, plus de dépendance d'ordre
     for nid, st in status_by_id.items():
-        if nid in row0 or "DONE" in st or st != "TODO":
+        if nid in row0:
             continue
         preds = preds_all.get(nid, [])
         loc = node_data_by_id[nid].get("location", "Sans projet")
