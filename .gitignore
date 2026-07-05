@@ -4,5 +4,15 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
-backup/
 .claude/settings.local.json
+
+# données runtime (par personne, jamais versionnées)
+data/
+
+# backup GitHub a son propre repo git séparé
+backup/
+
+# secrets et script root du service auth
+auth/users.json
+auth/secret_key
+auth/root_helper.sh
