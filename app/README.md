@@ -4,6 +4,10 @@ Application web de gestion de tâches avec dépendances, visualisée comme un gr
 
 Stack : Python / Plotly Dash + Dash Cytoscape.
 
+En production, ce code tourne pour plusieurs utilisateurs sur un VPS — voir
+[../README.md](../README.md) pour l'architecture de déploiement multi-utilisateur.
+Ce qui suit concerne uniquement le lancement en local pour développer.
+
 ## Prérequis
 
 - Python 3.9 ou plus récent
@@ -14,7 +18,7 @@ Stack : Python / Plotly Dash + Dash Cytoscape.
 ```bash
 # 1. Cloner le repo
 git clone https://github.com/fabien-arnaud/Tasky.git
-cd Tasky
+cd Tasky/app
 
 # 2. Créer un environnement virtuel
 python -m venv venv
@@ -29,8 +33,9 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Initialiser les données
-cp data/tasks.example.csv data/tasks.csv
-cp data/node_positions.example.json data/node_positions.json
+mkdir -p data
+cp seed/tasks.example.csv data/tasks.csv
+cp seed/node_positions.example.json data/node_positions.json
 ```
 
 ## Lancer l'application
@@ -47,11 +52,6 @@ Puis ouvrir [http://localhost:8050](http://localhost:8050) dans un navigateur.
 git pull
 # Redémarrer tasky.py
 ```
-
-## Déploiement sur VPS (optionnel)
-
-Pour un accès depuis n'importe où, l'app peut tourner en production avec gunicorn derrière nginx.
-Se référer à la documentation de Dash pour le déploiement.
 
 ## Variables d'environnement (optionnel)
 

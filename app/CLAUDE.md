@@ -4,7 +4,11 @@
 
 Application web de gestion de tâches avec dépendances, visualisée comme un graphe.
 Stack : Python / Plotly Dash + Dash Cytoscape (Cytoscape.js). Un seul fichier `tasky.py` (~2100 lignes).
-Déployée sur une VPS propriétaire, accessible via `tasky.dynetah.com`.
+Déployée sur une VPS propriétaire, accessible via `tasky.dynetah.com`, pour plusieurs
+utilisateurs (fabien, yoan, davy...) avec un login self-service.
+
+**Déploiement multi-utilisateur (nginx, auth, systemd, sudoers, backup) : voir
+[../README.md](../README.md).** Ce fichier-ci ne couvre que le code de l'appli.
 
 ## Architecture
 
@@ -12,21 +16,19 @@ Déployée sur une VPS propriétaire, accessible via `tasky.dynetah.com`.
 Tout le code est dans `tasky.py` : modèle de données, logique métier, layout Dash, callbacks.
 
 ### Stockage local versionné
-Les données vivent dans `data/` (non commité dans git) :
-- `data/tasks.csv` — les tâches
-- `data/node_positions.json` — positions X/Y des nœuds sur le canvas
-- `data/history/` — snapshots versionnés (max 100), un dossier numéroté par version
+Les données vivent dans `DATA_DIR` (une valeur par utilisateur en prod, ex.
+`/home/fabien/tasky/data/<prenom>`, non commité dans git) :
+- `tasks.csv` — les tâches
+- `node_positions.json` — positions X/Y des nœuds sur le canvas
+- `history/` — snapshots versionnés (max 100), un dossier numéroté par version
 
 La classe `LocalVersionedStorage` gère lecture/écriture + historique undo.
-Variable d'env optionnelle : `DATA_DIR` (défaut : `./data`).
+Variable d'env : `DATA_DIR` (défaut en dev local : `./data`).
+Fichiers exemples utilisés pour seeder un `DATA_DIR` vide : `seed/tasks.example.csv`
+et `seed/node_positions.example.json`.
 
 **Undo** : bouton "↩" dans l'UI. Retour en arrière sur les deux fichiers ensemble.
 Après un undo, le prochain changement détruit les versions "futures".
-
-### Backup GitHub (à implémenter)
-Un script de backup horaire vers le repo privé `fabien-arnaud/tasky-data` est prévu.
-Variable d'env : `GITHUB_BACKUP_TOKEN`.
-Déclenchement uniquement si les fichiers ont changé depuis le dernier backup (hash).
 
 ### Modèle de données (`tasks.csv`)
 Colonnes : `id, type, status, location, description, predecessors, quick`
@@ -49,16 +51,9 @@ Colonnes : `id, type, status, location, description, predecessors, quick`
 - **Planification** : graphe complet avec groupes par location
 - **Exécution** : vue filtrée, tâches actionnables seulement, layout calculé côté serveur
 
-## Déploiement (à faire)
-
-- Serveur : systemd + gunicorn
-- Reverse proxy : nginx sur `tasky.dynetah.com`, Basic Auth, SSL Let's Encrypt
-- Variables d'env dans un fichier `.env` (non commité) : `DATA_DIR`, `GITHUB_BACKUP_TOKEN`
-- Cron horaire pour backup vers `fabien-arnaud/tasky-data` (uniquement si modif)
-
 ## Règles de travail
 
 - Toujours proposer et expliquer avant de modifier le code. L'utilisateur valide avant.
-- Ne pas modifier `data/` (données de prod, non commitées).
-- `data/`, `venv/`, `.env` sont dans `.gitignore`.
+- Ne pas modifier les dossiers `data/<prenom>/` (données de prod, non commitées).
+- `venv/`, `.env` sont dans `.gitignore` (au niveau de `/home/fabien/tasky/`).
 - Convention de version : `v2.0.XXX` dans la constante `VERSION` en tête de `tasky.py`.
