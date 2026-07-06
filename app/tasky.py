@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.020"
+VERSION = "2.1.021"
 
 import copy
 import os
@@ -1484,27 +1484,31 @@ def store_viewport_debug(pan, zoom, extent):
 # Sortie vers un Store factice pour éviter un bug du renderer Dash.
 clientside_callback(
     """
-    function(extentData) {
+    function(viewportData) {
         try {
-            if (extentData == null || typeof extentData !== 'object') return 0;
-            var x1 = extentData.x1, x2 = extentData.x2, y1 = extentData.y1, y2 = extentData.y2;
-            if (typeof x1 !== 'number' || typeof x2 !== 'number' || typeof y1 !== 'number' || typeof y2 !== 'number') return 0;
+            if (viewportData == null || typeof viewportData !== 'object') return 0;
             var cy = (typeof window !== 'undefined') ? window.cy : null;
             if (!cy || typeof cy.zoom !== 'function' || typeof cy.pan !== 'function') return 0;
-            var xMin = Math.min(x1, x2), xMax = Math.max(x1, x2), yMin = Math.min(y1, y2), yMax = Math.max(y1, y2);
-            var boxW = xMax - xMin, boxH = yMax - yMin;
-            if (boxW <= 0 || boxH <= 0) return 0;
-            var pad = 50;
             function doRestore() {
                 try {
                     if (!window.cy) return;
                     var c = window.cy;
-                    var W = c.width(), H = c.height();
-                    if (W <= 0 || H <= 0) return;
-                    var zoom = Math.min((W - 2 * pad) / boxW, (H - 2 * pad) / boxH);
-                    var centerX = (xMin + xMax) / 2, centerY = (yMin + yMax) / 2;
-                    c.zoom(zoom);
-                    c.pan({ x: W / 2 - centerX * zoom, y: H / 2 - centerY * zoom });
+                    if (viewportData.zoom != null && viewportData.pan != null) {
+                        c.zoom(viewportData.zoom);
+                        c.pan(viewportData.pan);
+                    } else {
+                        var x1 = viewportData.x1, x2 = viewportData.x2, y1 = viewportData.y1, y2 = viewportData.y2;
+                        if (typeof x1 !== 'number') return;
+                        var pad = 50;
+                        var W = c.width(), H = c.height();
+                        if (W <= 0 || H <= 0) return;
+                        var xMin = Math.min(x1,x2), xMax = Math.max(x1,x2), yMin = Math.min(y1,y2), yMax = Math.max(y1,y2);
+                        var boxW = xMax-xMin, boxH = yMax-yMin;
+                        if (boxW <= 0 || boxH <= 0) return;
+                        var zoom = Math.min((W-2*pad)/boxW, (H-2*pad)/boxH);
+                        c.zoom(zoom);
+                        c.pan({ x: W/2 - (xMin+xMax)/2*zoom, y: H/2 - (yMin+yMax)/2*zoom });
+                    }
                 } catch (e2) { console.warn('restore-viewport:', e2); }
             }
             setTimeout(doRestore, 250);
@@ -2356,7 +2360,7 @@ def undo_action(n_clicks, viewport_debug):
     except ValueError:
         return dash.no_update, dash.no_update, dash.no_update, True
     elements, meta = build_model_from_csv()
-    return elements, meta, (viewport_debug or {}).get("extent"), not _storage.can_undo()
+    return elements, meta, viewport_debug, not _storage.can_undo()
 
 
 if __name__ == "__main__":
