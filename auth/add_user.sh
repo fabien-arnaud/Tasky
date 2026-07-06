@@ -25,7 +25,7 @@ with open(users_path) as f:
 if name in users:
     print(f"'{name}' existe déjà dans users.json", file=sys.stderr)
     sys.exit(1)
-users[name] = {"password_hash": None}
+users[name] = {"password_hash": None, "session_version": 0}
 with open(users_path, "w") as f:
     json.dump(users, f, indent=2, ensure_ascii=False)
     f.write("\n")

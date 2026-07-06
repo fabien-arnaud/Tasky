@@ -147,6 +147,7 @@ def login():
         save_users(users)
         session.clear()
         session["user"] = name
+        session["sv"] = users[name].get("session_version", 0)
         session.permanent = True
         return redirect(next_url)
 
@@ -163,6 +164,7 @@ def login():
             return render("check", name=name, next_url=next_url, error="Mot de passe incorrect.")
         session.clear()
         session["user"] = name
+        session["sv"] = users[name].get("session_version", 0)
         session.permanent = True
         return redirect(next_url)
 
@@ -182,6 +184,10 @@ def verify():
         abort(401)
     users = load_users()
     if user not in users:
+        session.clear()
+        abort(401)
+    if session.get("sv") != users[user].get("session_version", 0):
+        # Session révoquée (mot de passe réinitialisé depuis) : il faut se reconnecter.
         session.clear()
         abort(401)
     resp = app.response_class(status=200)

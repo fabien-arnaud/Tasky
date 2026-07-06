@@ -41,9 +41,10 @@ import json
 path = '$USERS_JSON'
 users = json.load(open(path))
 users['$NAME']['password_hash'] = None
+users['$NAME']['session_version'] = users['$NAME'].get('session_version', 0) + 1
 with open(path, 'w') as f:
     json.dump(users, f, indent=2, ensure_ascii=False)
     f.write('\n')
 "
 
-echo "Mot de passe de '$NAME' réinitialisé. Il/elle devra en choisir un nouveau à la prochaine connexion."
+echo "Mot de passe de '$NAME' réinitialisé (et toutes ses sessions actives révoquées). Il/elle devra en choisir un nouveau à la prochaine connexion."
