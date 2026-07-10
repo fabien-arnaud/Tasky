@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.001"
+VERSION = "2.2.002"
 
 import copy
 import os
@@ -988,8 +988,8 @@ def serve_layout():
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
             html.Span(VERSION, style={"font-size": "11px", "color": "#bbb", "position": "fixed", "bottom": "6px", "right": "10px", "zIndex": "1100", "pointerEvents": "none"}),
-            html.Button("▶ Exécution", id="view-toggle-btn", n_clicks=0, style={
-                "position": "fixed", "top": "6px", "right": "10px",
+            html.Button("Vue exécution", id="view-toggle-btn", n_clicks=0, style={
+                "position": "fixed", "top": "6px", "left": "10px",
                 "zIndex": "1100", "fontSize": "13px",
                 "background": "white", "border": "1px solid #ccc",
                 "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
@@ -999,7 +999,7 @@ def serve_layout():
                 id="undo-btn", n_clicks=0, title="Annuler",
                 disabled=not _storage.can_undo(),
                 style={
-                    "position": "fixed", "top": "6px", "right": "145px",
+                    "position": "fixed", "top": "6px", "left": "130px",
                     "zIndex": "1100", "fontSize": "14px",
                     "background": "white", "border": "1px solid #ccc",
                     "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
@@ -1054,7 +1054,7 @@ clientside_callback(
         var next = cur === 'planning' ? 'execution' : 'planning';
         window._viewMode = next;
         var btn = document.getElementById('view-toggle-btn');
-        if (btn) btn.textContent = next === 'execution' ? '📋 Planification' : '▶ Exécution';
+        if (btn) btn.textContent = next === 'execution' ? 'Vue plan' : 'Vue exécution';
         return next;
     }
     """,
