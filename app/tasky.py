@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.021"
+VERSION = "2.2.003"
 
 import copy
 import os
@@ -79,12 +79,12 @@ class LocalVersionedStorage:
         with open(os.path.join(self.data_dir, filename), "r", encoding="utf-8") as f:
             return f.read()
 
-    def write_text(self, filename: str, content: str, **kwargs) -> None:
+    def write_text(self, filename: str, content: str, label: str = "") -> None:
         with open(os.path.join(self.data_dir, filename), "w", encoding="utf-8") as f:
             f.write(content)
-        self._save_snapshot()
+        self._save_snapshot(label=label)
 
-    def _save_snapshot(self):
+    def _save_snapshot(self, label: str = ""):
         head = self._get_head()
         new_head = head + 1
         for n in self._all_versions():
@@ -96,6 +96,9 @@ class LocalVersionedStorage:
             src = os.path.join(self.data_dir, fname)
             if os.path.exists(src):
                 shutil.copy2(src, os.path.join(snap, fname))
+        if label:
+            with open(os.path.join(snap, "label.txt"), "w", encoding="utf-8") as f:
+                f.write(label)
         self._set_head(new_head)
         self._prune()
 
@@ -124,6 +127,17 @@ class LocalVersionedStorage:
         head = self._get_head()
         versions = self._all_versions()
         return head in versions and versions.index(head) > 0
+
+    def undo_label(self) -> str:
+        head = self._get_head()
+        versions = self._all_versions()
+        if head not in versions or versions.index(head) == 0:
+            return ""
+        label_path = os.path.join(self._snap_dir(head), "label.txt")
+        try:
+            return open(label_path, encoding="utf-8").read().strip()
+        except Exception:
+            return ""
 
 
 _storage = LocalVersionedStorage()
@@ -741,7 +755,7 @@ def _collect_descendants(
     return list(visited_nodes), list(visited_edges)
 
 
-def save_csv_from_meta(meta: dict) -> None:
+def save_csv_from_meta(meta: dict, label: str = "") -> None:
     """Reécrit le CSV entier depuis le meta-store (pour synchroniser après changements en mémoire)."""
     types_dict = meta.get("types_dict", {})
     status_dict = meta.get("raw_status_dict") or meta.get("status_dict", {})  # statuts bruts sans TOPRIO/Ready
@@ -768,7 +782,24 @@ def save_csv_from_meta(meta: dict) -> None:
     writer = csv.DictWriter(buf, fieldnames=["id", "type", "status", "location", "description", "predecessors", "quick"])
     writer.writeheader()
     writer.writerows(rows)
-    _storage.write_text("tasks.csv", buf.getvalue())
+    _storage.write_text("tasks.csv", buf.getvalue(), label=label)
+
+
+def _node_label(m: dict, node_id: str) -> str:
+    raw = m.get("desc_dict", {}).get(node_id, node_id)
+    if ": " in raw:
+        return raw.split(": ", 1)[1]
+    return raw
+
+
+def _action_label(verb: str, names: list) -> str:
+    if not names:
+        return verb
+    first = names[0]
+    if len(names) == 1:
+        return f"{verb} : {first}"
+    n = len(names) - 1
+    return f"{verb} : {first} et {n} autre{'s' if n > 1 else ''}"
 
 
 
@@ -809,6 +840,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "style": {
             "shape": "round-rectangle",
             "background-color": BG_COLOR,
+            "background-opacity": 0,
             "border-color": "#888888",
             "border-width": 2,
             "padding": "30px",
@@ -817,6 +849,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "font-weight": "bold",
             "font-size": "64px",
             "events": "no",
+            "z-compound-depth": "bottom",
         },
     },
     # Cadres projet invisibles en mode exécution (séparateurs dessinés sur canvas overlay)
@@ -837,6 +870,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "background-color": "data(node_bg)",
             "border-width":     "data(node_bw)",
             "border-color":     "data(node_bc)",
+            "z-index":          10,
         },
     },
     # Nœud objectif (type O) — forme triangle, fond lavande
@@ -957,16 +991,18 @@ def serve_layout():
         [
             html.Span(id="save-status", style={"font-size": "12px", "color": "#c00", "position": "fixed", "top": "8px", "left": "10px", "zIndex": "1100"}),
             html.Span(VERSION, style={"font-size": "11px", "color": "#bbb", "position": "fixed", "bottom": "6px", "right": "10px", "zIndex": "1100", "pointerEvents": "none"}),
-            html.Button("▶ Exécution", id="view-toggle-btn", n_clicks=0, style={
-                "position": "fixed", "top": "6px", "right": "10px",
+            html.Button("Vue exécution", id="view-toggle-btn", n_clicks=0, style={
+                "position": "fixed", "top": "6px", "left": "10px",
                 "zIndex": "1100", "fontSize": "13px",
                 "background": "white", "border": "1px solid #ccc",
                 "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
             }),
-            html.Button("↩", id="undo-btn", n_clicks=0, title="Annuler",
+            html.Button(
+                [html.Span("annuler", style={"marginRight": "4px"}), html.Span(id="undo-label", children=_storage.undo_label())],
+                id="undo-btn", n_clicks=0, title="Annuler",
                 disabled=not _storage.can_undo(),
                 style={
-                    "position": "fixed", "top": "6px", "right": "145px",
+                    "position": "fixed", "top": "6px", "left": "130px",
                     "zIndex": "1100", "fontSize": "14px",
                     "background": "white", "border": "1px solid #ccc",
                     "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
@@ -1021,7 +1057,7 @@ clientside_callback(
         var next = cur === 'planning' ? 'execution' : 'planning';
         window._viewMode = next;
         var btn = document.getElementById('view-toggle-btn');
-        if (btn) btn.textContent = next === 'execution' ? '📋 Planification' : '▶ Exécution';
+        if (btn) btn.textContent = next === 'execution' ? 'Vue plan' : 'Vue exécution';
         return next;
     }
     """,
@@ -1549,6 +1585,8 @@ clientside_callback(
             // --- Snap on dragfree ---
             var SNAP_GRID = 40;
             window._dragfreeCnt = 0;
+            window._dragBatchNodes = [];
+            window._dragBatchTimer = null;
             window.cy.on('dragfree', 'node', function(evt) {
                 var node = evt.target;
                 if (node.data('is_group') === 'True') return;
@@ -1557,9 +1595,16 @@ clientside_callback(
                     x: Math.round(pos.x / SNAP_GRID) * SNAP_GRID,
                     y: Math.round(pos.y / SNAP_GRID) * SNAP_GRID
                 });
-                // Déclenche la sauvegarde des positions côté serveur
-                window._dragfreeCnt = (window._dragfreeCnt || 0) + 1;
-                window.dash_clientside.set_props('dragfree-trigger', {data: window._dragfreeCnt});
+                // Accumule les nœuds déplacés pour le label undo
+                var lbl = node.data('label') || node.id();
+                if (lbl.indexOf(': ') > -1) lbl = lbl.split(': ').slice(1).join(': ');
+                if (window._dragBatchNodes.indexOf(lbl) === -1) window._dragBatchNodes.push(lbl);
+                clearTimeout(window._dragBatchTimer);
+                window._dragBatchTimer = setTimeout(function() {
+                    window._dragfreeCnt = (window._dragfreeCnt || 0) + 1;
+                    window.dash_clientside.set_props('dragfree-trigger', {data: {cnt: window._dragfreeCnt, nodes: window._dragBatchNodes.slice()}});
+                    window._dragBatchNodes = [];
+                }, 50);
             });
 
             // --- Mode création de lien ---
@@ -2093,7 +2138,7 @@ def _extract_positions(elements_state: list) -> Dict[str, Dict[str, float]]:
 
 
 @app.callback(
-    Output("save-status", "children"),
+    [Output("save-status", "children"), Output("undo-label", "children", allow_duplicate=True), Output("undo-btn", "disabled", allow_duplicate=True)],
     Input("dragfree-trigger", "data"),
     State("planning-graph", "elements"),
     State("view-mode", "data"),
@@ -2102,15 +2147,17 @@ def _extract_positions(elements_state: list) -> Dict[str, Dict[str, float]]:
 def save_positions_on_dragfree(trigger, elements_state, view_mode):
     """Sauvegarde les positions dans tasky-data à chaque déplacement de nœud."""
     if not trigger or view_mode == "execution":
-        return dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update
     positions = _extract_positions(elements_state or [])
     if not positions:
-        return dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update
+    nodes = trigger.get("nodes", []) if isinstance(trigger, dict) else []
+    label = _action_label("déplacement", nodes) if nodes else "déplacement"
     try:
-        _storage.write_text("node_positions.json", json.dumps(positions, indent=2))
+        _storage.write_text("node_positions.json", json.dumps(positions, indent=2), label=label)
     except Exception as exc:
-        return f"Erreur: {exc}"
-    return dash.no_update
+        return f"Erreur: {exc}", dash.no_update, dash.no_update
+    return dash.no_update, _storage.undo_label(), not _storage.can_undo()
 
 
 @app.callback(
@@ -2118,6 +2165,8 @@ def save_positions_on_dragfree(trigger, elements_state, view_mode):
         Output("planning-graph", "elements", allow_duplicate=True),
         Output("meta-store", "data", allow_duplicate=True),
         Output("restore-viewport-trigger", "data", allow_duplicate=True),
+        Output("undo-label", "children", allow_duplicate=True),
+        Output("undo-btn", "disabled", allow_duplicate=True),
     ],
     Input("ctx-action", "data"),
     [State("planning-graph", "elements"), State("meta-store", "data"), State("viewport-debug", "data")],
@@ -2125,22 +2174,22 @@ def save_positions_on_dragfree(trigger, elements_state, view_mode):
 )
 def handle_context_action(action_data, elements_state, meta_data, viewport_debug):
     if not action_data:
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
     action = action_data.get("action")
     m = meta_data or {}
 
-    def _finalize(new_els, new_m):
+    def _finalize(new_els, new_m, label=""):
         try:
-            save_csv_from_meta(new_m)
+            save_csv_from_meta(new_m, label=label)
         except Exception:
             pass
-        return new_els, new_m, (viewport_debug or {}).get("extent")
+        return new_els, new_m, (viewport_debug or {}).get("extent"), _storage.undo_label(), not _storage.can_undo()
 
     if action == "delete_selection":
         edge_ids = action_data.get("edge_ids", [])
         node_ids_to_delete = set(action_data.get("node_ids", []))
         if not edge_ids and not node_ids_to_delete:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         # Supprimer les arêtes explicitement sélectionnées + toutes celles liées aux nœuds supprimés
         edge_ids_set = set(edge_ids)
@@ -2173,28 +2222,29 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
                     pred_dict[tgt] = [p for p in pred_dict[tgt] if p != src]
         new_meta = _recompute_meta(base_meta, pred_dict)
         new_elements = patch_elements_after_dependency_change(new_elements, None, None, new_meta)
-        return _finalize(new_elements, new_meta)
+        names = [_node_label(m, nid) for nid in node_ids_to_delete]
+        return _finalize(new_elements, new_meta, _action_label("suppression", names))
 
     if action == "create_edge":
         source = action_data.get("source")
         target = action_data.get("target")
         if not source or not target:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         if source in pred_dict.get(target, []):
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         if _would_create_cycle(pred_dict, source, target):
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         pred_dict.setdefault(target, []).append(source)
         new_meta = _recompute_meta(m, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), (source, target), None, new_meta)
-        return _finalize(new_elements, new_meta)
+        return _finalize(new_elements, new_meta, "ajout de lien")
 
     if action == "set_status":
         node_ids = action_data.get("node_ids", [])
         new_status = action_data.get("status")
         if not node_ids or not new_status:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         raw_status = dict(m.get("raw_status_dict") or m.get("status_dict", {}))
         for nid in node_ids:
             if nid in raw_status:
@@ -2204,13 +2254,14 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        return _finalize(new_elements, new_meta)
+        names = [_node_label(m, nid) for nid in node_ids]
+        return _finalize(new_elements, new_meta, _action_label("changement d'état", names))
 
     if action == "rename_node":
         node_id = action_data.get("node_id")
         new_name = action_data.get("new_name", "").strip()
         if not node_id or not new_name:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         desc_dict = dict(m.get("desc_dict", {}))
         desc_dict[node_id] = f"{node_id}: {new_name}"
         base = dict(m)
@@ -2218,13 +2269,13 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        return _finalize(new_elements, new_meta)
+        return _finalize(new_elements, new_meta, f"renommage : {new_name}")
 
     if action == "move_node":
         node_ids = action_data.get("node_ids", [])
         project = action_data.get("project", "").strip()
         if not node_ids or not project:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         location_dict = dict(m.get("location_dict", {}))
         for nid in node_ids:
             if nid in location_dict:
@@ -2234,13 +2285,14 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = rebuild_elements_with_positions(new_meta, list(elements_state or []))
-        return _finalize(new_elements, new_meta)
+        names = [_node_label(m, nid) for nid in node_ids]
+        return _finalize(new_elements, new_meta, _action_label("déplacement vers projet", names))
 
     if action == "rename_project":
         old_name = action_data.get("old_name", "").strip()
         new_name = action_data.get("new_name", "").strip()
         if not old_name or not new_name or old_name == new_name:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         location_dict = dict(m.get("location_dict", {}))
         for nid, loc in location_dict.items():
             if loc == old_name:
@@ -2261,16 +2313,16 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
             elif data.get("parent") == old_group_id:
                 data["location"] = new_name
         try:
-            save_csv_from_meta(new_meta)
+            save_csv_from_meta(new_meta, label=f"renommage de projet : {new_name}")
         except Exception:
             pass
-        return new_elements, new_meta, None
+        return new_elements, new_meta, None, _storage.undo_label(), not _storage.can_undo()
 
     if action == "create_node":
         name = action_data.get("name", "").strip()
         project = action_data.get("project", "").strip()
         if not name or not project:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         existing_ids = [int(k) for k in m.get("types_dict", {}).keys() if k.isdigit()]
         new_id = str(max(existing_ids) + 1) if existing_ids else "1"
         types_dict = dict(m.get("types_dict", {}))
@@ -2307,13 +2359,13 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
             except Exception:
                 saved_positions = {}
             saved_positions[new_id] = {"x": float(pos["x"]), "y": float(pos["y"])}
-            _storage.write_text("node_positions.json", json.dumps(saved_positions, indent=2))
-        return _finalize(new_elements, new_meta)
+            _storage.write_text("node_positions.json", json.dumps(saved_positions, indent=2), label=f"création : {name}")
+        return _finalize(new_elements, new_meta, f"création : {name}")
 
     if action == "toggle_quick":
         node_ids = action_data.get("node_ids", [])
         if not node_ids:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         quick_dict = dict(m.get("quick_dict", {}))
         for nid in node_ids:
             quick_dict[nid] = not quick_dict.get(nid, False)
@@ -2322,12 +2374,13 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        return _finalize(new_elements, new_meta)
+        names = [_node_label(m, nid) for nid in node_ids]
+        return _finalize(new_elements, new_meta, _action_label("tâche rapide", names))
 
     if action == "toggle_buy":
         node_ids = action_data.get("node_ids", [])
         if not node_ids:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
         types_dict = dict(m.get("types_dict", {}))
         for nid in node_ids:
             types_dict[nid] = "F" if types_dict.get(nid) == "A" else "A"
@@ -2336,9 +2389,10 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         pred_dict = {k: list(v) for k, v in m.get("pred_dict", {}).items()}
         new_meta = _recompute_meta(base, pred_dict)
         new_elements = patch_elements_after_dependency_change(list(elements_state or []), None, None, new_meta)
-        return _finalize(new_elements, new_meta)
+        names = [_node_label(m, nid) for nid in node_ids]
+        return _finalize(new_elements, new_meta, _action_label("type achat", names))
 
-    return dash.no_update, dash.no_update, dash.no_update
+    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
 @app.callback(
@@ -2347,6 +2401,7 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
         Output("meta-store", "data", allow_duplicate=True),
         Output("restore-viewport-trigger", "data", allow_duplicate=True),
         Output("undo-btn", "disabled"),
+        Output("undo-label", "children", allow_duplicate=True),
     ],
     Input("undo-btn", "n_clicks"),
     State("viewport-debug", "data"),
@@ -2354,13 +2409,13 @@ def handle_context_action(action_data, elements_state, meta_data, viewport_debug
 )
 def undo_action(n_clicks, viewport_debug):
     if not n_clicks:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
     try:
         _storage.undo()
     except ValueError:
-        return dash.no_update, dash.no_update, dash.no_update, True
+        return dash.no_update, dash.no_update, dash.no_update, True, dash.no_update
     elements, meta = build_model_from_csv()
-    return elements, meta, viewport_debug, not _storage.can_undo()
+    return elements, meta, viewport_debug, not _storage.can_undo(), _storage.undo_label()
 
 
 if __name__ == "__main__":
