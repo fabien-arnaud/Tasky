@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.1.022"
+VERSION = "2.1.023"
 
 import copy
 import os
@@ -809,6 +809,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "style": {
             "shape": "round-rectangle",
             "background-color": BG_COLOR,
+            "background-opacity": 0,
             "border-color": "#888888",
             "border-width": 2,
             "padding": "30px",
