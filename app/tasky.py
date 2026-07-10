@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.002"
+VERSION = "2.2.003"
 
 import copy
 import os
@@ -840,6 +840,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
         "style": {
             "shape": "round-rectangle",
             "background-color": BG_COLOR,
+            "background-opacity": 0,
             "border-color": "#888888",
             "border-width": 2,
             "padding": "30px",
@@ -848,6 +849,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "font-weight": "bold",
             "font-size": "64px",
             "events": "no",
+            "z-compound-depth": "bottom",
         },
     },
     # Cadres projet invisibles en mode exécution (séparateurs dessinés sur canvas overlay)
@@ -868,6 +870,7 @@ CYTOSCAPE_STYLESHEET: List[dict] = [
             "background-color": "data(node_bg)",
             "border-width":     "data(node_bw)",
             "border-color":     "data(node_bc)",
+            "z-index":          10,
         },
     },
     # Nœud objectif (type O) — forme triangle, fond lavande
