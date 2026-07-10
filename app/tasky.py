@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.000"
+VERSION = "2.2.001"
 
 import copy
 import os
@@ -995,7 +995,7 @@ def serve_layout():
                 "borderRadius": "6px", "padding": "4px 10px", "cursor": "pointer",
             }),
             html.Button(
-                [html.Span("↩", style={"marginRight": "4px"}), html.Span(id="undo-label", children=_storage.undo_label())],
+                [html.Span("annuler", style={"marginRight": "4px"}), html.Span(id="undo-label", children=_storage.undo_label())],
                 id="undo-btn", n_clicks=0, title="Annuler",
                 disabled=not _storage.can_undo(),
                 style={
