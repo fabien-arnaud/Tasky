@@ -1706,6 +1706,37 @@ clientside_callback(
 
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); exitHighlightMode(); }
+                if (e.key === 'F2') {
+                    var sel = window.cy.$(':selected[is_group != "True"]');
+                    if (sel.length !== 1) return;
+                    e.preventDefault();
+                    var node = sel[0];
+                    var pos = node.renderedPosition();
+                    var currentDesc = (node.data('label') || '').replace(/^⚡ /, '').replace(/^[^:]+: */, '');
+                    ctxMenu.innerHTML = '';
+                    var inp = document.createElement('input');
+                    inp.type = 'text'; inp.value = currentDesc;
+                    inp.style.cssText = 'margin:6px 10px;padding:5px;width:calc(100% - 28px);box-sizing:border-box;';
+                    ctxMenu.appendChild(inp);
+                    var btn = document.createElement('button');
+                    btn.textContent = 'Valider';
+                    btn.style.cssText = 'margin:0 10px 8px;padding:5px 12px;cursor:pointer;';
+                    btn.onclick = function() {
+                        var v = inp.value.trim();
+                        if (v) dispatch({action:'rename_node', node_id:node.id(), new_name:v});
+                    };
+                    ctxMenu.appendChild(btn);
+                    ctxMenu.style.left = pos.x + 'px';
+                    ctxMenu.style.top  = (pos.y + 24) + 'px';
+                    ctxMenu.style.display = 'block';
+                    setTimeout(function(){
+                        var r = ctxMenu.getBoundingClientRect();
+                        if (r.right  > window.innerWidth)  ctxMenu.style.left = (pos.x - r.width)  + 'px';
+                        if (r.bottom > window.innerHeight)  ctxMenu.style.top  = (pos.y - r.height) + 'px';
+                    }, 0);
+                    inp.focus(); inp.select();
+                    inp.onkeydown = function(e2){ if (e2.key==='Enter') btn.onclick(); if (e2.key==='Escape') hideCtxMenu(); };
+                }
             });
 
 
