@@ -1706,6 +1706,16 @@ clientside_callback(
 
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); exitHighlightMode(); }
+                if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement === document.body) {
+                    var selNodes = window.cy.$(':selected').filter('node').not('[is_group = "True"]');
+                    var selEdges = window.cy.edges('.edge-selected');
+                    var nodeIds = selNodes.map(function(n){ return n.id(); });
+                    var edgeIds = selEdges.map(function(e2){ return e2.id(); });
+                    if (nodeIds.length > 0 || edgeIds.length > 0) {
+                        e.preventDefault();
+                        dispatch({action:'delete_selection', node_ids:nodeIds, edge_ids:edgeIds});
+                    }
+                }
                 if (e.key === 'F2') {
                     var sel = window.cy.$(':selected[is_group != "True"]');
                     if (sel.length !== 1) return;
