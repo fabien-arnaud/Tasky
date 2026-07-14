@@ -7,7 +7,10 @@ VPS_HOST="fabien@tasky.dynetah.com"
 VPS_BASE="/home/fabien/tasky/data"
 LOCAL_BASE="$(cd "$(dirname "$0")" && pwd)/data"
 FILES=("tasks.csv" "node_positions.json")
-KNOWN_USERS=("fabien" "yoan" "davy")
+KNOWN_USERS=($(ssh "$VPS_HOST" "ls $VPS_BASE/" 2>/dev/null))
+if [ ${#KNOWN_USERS[@]} -eq 0 ]; then
+    KNOWN_USERS=("fabien")
+fi
 
 do_pull() {
     local user="$1"
@@ -19,10 +22,11 @@ do_pull() {
 
 do_push() {
     local user="$1"
+    echo ""
     echo "⬆  local → VPS ($user)"
-    echo "Attention : cela remplace les données de $user en production."
-    read -p "Confirmer ? (oui/non) : " confirm
-    if [ "$confirm" = "oui" ]; then
+    echo "ATTENTION : cela écrase les données de $user en production."
+    read -p "Tape \"$user\" pour confirmer : " confirm
+    if [ "$confirm" = "$user" ]; then
         for f in "${FILES[@]}"; do
             scp "$LOCAL_BASE/$f" "$VPS_HOST:$VPS_BASE/$user/$f" && echo "  OK $f"
         done
@@ -31,21 +35,23 @@ do_push() {
     fi
 }
 
+CHOSEN_USER="${KNOWN_USERS[0]}"
 choose_user() {
     echo ""
     echo "Utilisateur :"
     for i in "${!KNOWN_USERS[@]}"; do
         echo "  $((i+1)). ${KNOWN_USERS[$i]}"
     done
-    echo "  4. autre"
+    local next=$((${#KNOWN_USERS[@]}+1))
+    echo "  $next. autre"
     read -p "Choix : " uchoice
-    case "$uchoice" in
-        1) echo "fabien" ;;
-        2) echo "yoan" ;;
-        3) echo "davy" ;;
-        4) read -p "Nom d'utilisateur : " custom; echo "$custom" ;;
-        *) echo "fabien" ;;
-    esac
+    if [[ "$uchoice" -ge 1 && "$uchoice" -le "${#KNOWN_USERS[@]}" ]] 2>/dev/null; then
+        CHOSEN_USER="${KNOWN_USERS[$((uchoice-1))]}"
+    elif [[ "$uchoice" -eq "$next" ]] 2>/dev/null; then
+        read -p "Nom d'utilisateur : " CHOSEN_USER
+    else
+        CHOSEN_USER="${KNOWN_USERS[0]}"
+    fi
 }
 
 # --- Mode avec arguments ---
@@ -70,10 +76,10 @@ echo "  1. pull  — récupérer les données du VPS en local (pour tester)"
 echo "  2. push  — envoyer les données locales vers le VPS (modif prod)"
 read -p "Choix : " dchoice
 
-user=$(choose_user)
+choose_user
 
 case "$dchoice" in
-    1) do_pull "$user" ;;
-    2) do_push "$user" ;;
+    1) do_pull "$CHOSEN_USER" ;;
+    2) do_push "$CHOSEN_USER" ;;
     *) echo "Choix invalide."; exit 1 ;;
 esac
