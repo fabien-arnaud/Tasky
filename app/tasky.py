@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.003"
+VERSION = "2.2.005-gui-improvements"
 
 import copy
 import os
@@ -1847,13 +1847,16 @@ clientside_callback(
 
                     if (isOnNode && nodeIds.length > 0) {
                         rows.push(menuRow("📁 Projet ▶", function() {
+                            var currentProjs = {};
+                            nodeIds.forEach(function(id){ var loc = window.cy.$('#'+id).data('location'); if(loc) currentProjs[loc]=true; });
                             var projects = window.cy.nodes('[is_group = "True"]')
                                 .map(function(n){ return n.data('label'); })
                                 .filter(function(l){ return !!l; })
                                 .sort();
                             var subRows = [menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })];
                             projects.forEach(function(proj) {
-                                subRows.push(menuRow("📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj)));
+                                var isCurrent = !!currentProjs[proj];
+                                subRows.push(menuRow((isCurrent ? "✓ " : "   ") + "📁 " + proj, function(p){ return function(){ dispatch({action:"move_node", node_ids:nodeIds, project:p}); }; }(proj), isCurrent ? {bold:true} : {}));
                             });
                             subRows.push(menuRow("✚ Nouveau projet…", function() {
                                 renderMenu([menuRow("← retour", function(){ renderMenu(buildMainMenu(target, selNodes, nodeIds, edgeIds, isOnNode)); })]);
