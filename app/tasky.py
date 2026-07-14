@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.005-gui-improvements"
+VERSION = "2.2.005"
 
 import copy
 import os
