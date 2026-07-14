@@ -1706,6 +1706,11 @@ clientside_callback(
 
             document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape') { hideCtxMenu(); exitLinkMode(); window.cy.$(':selected').unselect(); clearEdgeSelection(); exitHighlightMode(); }
+                if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                    e.preventDefault();
+                    var btn = document.getElementById('undo-btn');
+                    if (btn && !btn.disabled) btn.click();
+                }
                 if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement === document.body) {
                     var selNodes = window.cy.$(':selected').filter('node').not('[is_group = "True"]');
                     var selEdges = window.cy.edges('.edge-selected');
