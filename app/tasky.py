@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "2.2.003"
+VERSION = "2.2.004"
 
 import copy
 import os
@@ -414,7 +414,7 @@ def build_cytoscape_elements(
             followers_locations = {
                 grouped_location_dict[o] for o in follow_dict.get(k, []) if o in grouped_location_dict
             }
-            if len(followers_locations) != 1:
+            if len(followers_locations) > 1:
                 grouped_location_dict[k] = "None"
 
     # Construction des groupes : location -> liste d'ids
@@ -583,7 +583,7 @@ def _edge_visible_in_style(
             followers_locations = {
                 grouped.get(o) for o in follow_dict.get(k, []) if o in grouped
             }
-            if len(followers_locations) != 1:
+            if len(followers_locations) > 1:
                 grouped[k] = "None"
     loc_k = grouped.get(source)
     loc_t = grouped.get(target)
